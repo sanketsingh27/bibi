@@ -1,6 +1,6 @@
 # Bibi — local App Store discovery
 
-Ticket [#15](https://github.com/sanketsingh27/bibi/issues/15), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), adds a separate local keyword-discovery application. `landing-page/` remains the existing informational site, unchanged.
+Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15) and [#16](https://github.com/sanketsingh27/bibi/issues/16), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide local keyword discovery, listing metadata, and app-ID copying. `landing-page/` remains the existing informational site, unchanged.
 
 ## Requirements and setup
 
@@ -38,11 +38,19 @@ The frontend's `.npmrc` disables dependency lifecycle scripts. The locked instal
 
 The screen starts blank in the United States storefront. Type a market phrase, then use **Search** or **Enter**. Typing and focusing never search. Results retain Apple's returned order, show at most 50 matches, and are not a complete App Store catalog or a classified competitor set.
 
-Each row identifies the name, developer, numeric Apple ID, and original safe listing link. Missing information is marked unavailable. Loading, no matches, invalid input, rate limits, timeout, and upstream failure have separate states. Manual Retry repeats the failed submitted phrase/storefront even if the input contains a newer draft. A newer submission invalidates older responses, including when the newer input is invalid.
+Each row identifies the name, developer, numeric Apple ID, category, average rating (out of five), rating count, available icon, and original safe listing link. Missing information is marked unavailable. A missing rating is not a zero-star score; a genuine zero rating/count stays zero. Rating counts are ratings, not written reviews, and belong to the displayed country storefront rather than global totals. Loading, no matches, invalid input, rate limits, timeout, and upstream failure have separate states. Manual Retry repeats the failed submitted phrase/storefront even if the input contains a newer draft. A newer submission invalidates older responses, including when the newer input is invalid.
 
 The submitted query/storefront, limited-match count, metadata fetch time and cache status belong to the displayed response. This ticket has **no metadata cache**: each successful search truthfully returns `cached=false`, including repeated and empty searches. There are no automatic retries, background searches, polling, queues, fallback data, saved browser search state, or search phrases in the page URL. Reload starts fresh. Browser requests and responses are not used as another metadata cache.
 
-App-name confirmation, the country-picker interaction, icon/category/ratings/copy UI, and metadata caching/request sharing belong to later tickets and are intentionally absent here. The API already supplies their complete normalized metadata contract and storefront catalog.
+App-name confirmation, the country-picker interaction, and metadata caching/request sharing belong to later tickets and are intentionally absent here.
+
+### Metadata, clipboard, and artwork
+
+**Copy app ID** writes only the numeric Apple app ID using the browser Clipboard API. The row announces success only after that operation resolves; denial, unavailable clipboard support, or another failure produces an accessible failure message and manual-copy guidance. Use a secure browser context (loopback is supported) and allow clipboard access when prompted. Search, copy, and original-listing links are keyboard-operable. Listing names, developers, and categories are rendered as text, never HTML.
+
+Icons load directly in the browser from normalized HTTPS artwork URLs; the backend does not fetch or store artwork files. An icon is displayed only when a safe original Apple listing link is also available, with a proximate linked **Download on the App Store** badge. Without the listing link, the icon is withheld and marked unavailable rather than inventing a destination. Failed icon loads are also marked unavailable.
+
+`frontend/public/download-on-the-app-store.svg` is Apple's unmodified preferred black badge, obtained from [Apple's official asset](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg). Each listing promotion uses a 40px-high badge with at least 10px clear space, linked to that listing; the footer credits Apple's trademarks. See the [Search API promotional-content terms](https://performance-partners.apple.com/search-api) and [App Store marketing guidelines and applicable artwork license](https://developer.apple.com/app-store/marketing/guidelines/). Artwork is used to promote its original listing, not Bibi or unrelated services; private/local use does not waive Apple's terms or confer additional permissions. This implementation is not a legal clearance or Apple endorsement.
 
 ## API
 
@@ -68,7 +76,7 @@ A successful response has `query`, `country`, UTC ISO-8601 `fetchedAt`, `cached`
 
 - `appId`: positive JavaScript-safe integer; `country`: requested storefront.
 - `name`, `developer`, `category`: plain-text strings or null. Markup-like text is never interpreted as HTML.
-- `iconUrl`: safe HTTPS artwork URL, using the 60px fallback when the 100px URL is unavailable/unsafe; otherwise null. No artwork is rendered in #15.
+- `iconUrl`: safe HTTPS artwork URL, using the 60px fallback when the 100px URL is unavailable/unsafe; otherwise null. The browser renders it only with an available original-listing badge.
 - `averageRating`: finite number in 0–5 or null; `ratingCount`: nonnegative JavaScript-safe integer or null. Genuine zero stays zero, and a rating is never inferred from its count.
 - `storeUrl`: safe HTTPS link on `apps.apple.com` or `itunes.apple.com`, without credentials or nonstandard ports; otherwise null.
 
@@ -108,5 +116,12 @@ Browser runtime acceptance is separate from the suite/build:
 3. Submit rapidly changing phrases. Older responses must not overwrite the newer submission. Reload and confirm blank input, no result rows, US context and no page search parameters.
 4. For deterministic failures, wrap the real `create_app(apple_transport=..., clock=...)` in a **temporary local-only runner** using `httpx.MockTransport`, as the API tests do. Start that runner on port 8000 instead of the live backend, leaving the real Next.js path unchanged. Exercise successful empty, invalid query, Apple 429 with/without Retry-After, 503, and a blocked operation hitting the real 8-second deadline. Do not add fixture endpoints or fallbacks to the application.
 5. In that controlled runner, hold an older response behind an event, complete a newer search, then release the old response. Fail a submitted phrase, edit the draft, and use Retry: the request must still contain the failed phrase. Admit ten controlled dispatches (including failures), observe the next local 429 without an eleventh Apple dispatch, advance the controlled clock and retry manually. Inspect network/dispatch logs for no automatic retries. Check keyboard operation and 320/768/1024/1440px layouts.
+
+For [#16](https://github.com/sanketsingh27/bibi/issues/16), also verify:
+
+1. Search `adhd planner` through the real app. Inspect category, average rating, rating count, storefront scope, loaded artwork, and its adjacent approved badge. Open the badge and verify the corresponding original Apple listing.
+2. Use Tab and Enter/Space to copy an app ID, then paste into a plain-text input: the exact digits must match the displayed ID. Deny clipboard write permission and copy again: observe failure rather than success in the row's live status region.
+3. Through the same temporary `create_app(apple_transport=httpx.MockTransport(...))` runner described above, return missing optional metadata, null average with zero count, genuine zero average/count, unsafe artwork/listing URLs, a safe artwork URL without a safe listing link, and an unsafe 100px artwork URL with a safe 60px fallback. Confirm explicit unavailable states, preserved zeros, no executable unsafe links, and artwork only alongside an original-listing badge. Include HTML-like listing text and confirm literal text, not execution.
+4. Inspect narrow and wide layouts at 320/768/1024/1440px and the accessibility tree. Controlled upstream data is verification-only: never add a fixture endpoint, production fallback, or alternate UI test suite.
 
 Observed implementation evidence and final acceptance/integration status are recorded on [#15](https://github.com/sanketsingh27/bibi/issues/15). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.

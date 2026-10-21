@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorMessages, normalizedQuery, type Catalog, type SearchIdentity, type SearchResponse, type Storefront } from "./api";
+import { ListingRow } from "./listing-row";
 
 type Screen =
   | { kind: "initial" }
@@ -110,16 +111,14 @@ export default function Discovery() {
           {screen.kind === "success" && <>
             <div className="result-heading"><div><p className="eyebrow">{screen.submitted.country.name} · {screen.data.country.toUpperCase()}</p><h2>Matches for “{screen.data.query}”</h2></div><span className="result-count">{screen.data.results.length} displayed</span></div>
             <p className="result-note">Limited search matches · Up to 50 · Apple’s returned order, not a complete catalog.</p>
+            <p className="result-note">Average ratings and rating counts belong to the {screen.submitted.country.name} ({screen.data.country.toUpperCase()}) storefront, not global totals. Ratings are not written reviews.</p>
             <p className="fetch-info">Metadata fetched <time dateTime={screen.data.fetchedAt}>{new Date(screen.data.fetchedAt).toLocaleString()}</time> · {screen.data.cached ? "Cached metadata" : "Fresh from Apple · Not cached"}</p>
             {screen.data.results.length === 0 ? <div className="empty-state"><h3>No matches in this storefront.</h3><p>Apple returned no usable app matches. Try another phrase; no other country was substituted.</p></div> : <ol className="results">
-              {screen.data.results.map((app) => <li key={app.appId}>
-                <div className="listing-identity"><h3>{app.name ?? "App name unavailable"}</h3><p>{app.developer ?? "Developer unavailable"}</p><p className="app-id">Apple app ID <span>{app.appId}</span></p></div>
-                {app.storeUrl ? <a className="listing-link" href={app.storeUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${app.name ?? `app ${app.appId}`} on the App Store (new tab)`}>App Store <span aria-hidden="true">↗</span></a> : <span className="link-unavailable">Listing link unavailable</span>}
-              </li>)}
+              {screen.data.results.map((app) => <ListingRow key={app.appId} app={app} />)}
             </ol>}
           </>}
         </section>
-        <footer>Listing discovery, nothing more. Searches are not saved; reload to start fresh.</footer>
+        <footer>Listing discovery, nothing more. Searches are not saved; reload to start fresh.<br />Apple, the Apple logo, and App Store are trademarks of Apple Inc., registered in the U.S. and other countries.</footer>
       </main>
     </>
   );
