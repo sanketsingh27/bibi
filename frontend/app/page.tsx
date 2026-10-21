@@ -12,6 +12,9 @@ type Screen =
 
 export default function Discovery() {
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<"keyword" | "app-name">("keyword");
+  const [confirmedId, setConfirmedId] = useState<number | null>(null);
+  const resultHeading = useRef<HTMLHeadingElement | null>(null);
   const [country, setCountry] = useState<Storefront | null>(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [screen, setScreen] = useState<Screen>({ kind: "initial" });
@@ -33,6 +36,7 @@ export default function Discovery() {
   }, []);
 
   async function search(submitted: SearchIdentity) {
+    setConfirmedId(null);
     const current = ++sequence.current;
     pending.current?.abort();
     const controller = new AbortController();
@@ -67,6 +71,20 @@ export default function Discovery() {
   }
 
   const error = screen.kind === "error" ? errorMessages[screen.code] : null;
+  const confirmed = screen.kind === "success" && mode === "app-name"
+    ? screen.data.results.find((app) => app.appId === confirmedId)
+    : undefined;
+  const displayed = screen.kind === "success" ? (confirmed ? [confirmed] : screen.data.results) : [];
+
+  function changeMode(next: typeof mode) {
+    setMode(next);
+    setConfirmedId(null);
+  }
+
+  function confirm(appId: number | null) {
+    setConfirmedId(appId);
+    resultHeading.current?.focus();
+  }
 
   return (
     <>
@@ -77,16 +95,21 @@ export default function Discovery() {
       </header>
       <main>
         <div className="intro">
-          <p className="eyebrow">Apple App Store · Keyword search</p>
-          <h1>Find apps.<br /><span>Start with a keyword.</span></h1>
-          <p className="lede">Explore listing matches for a market, problem, or idea. Discovery only—no saved research or review collection.</p>
+          <p className="eyebrow">Apple App Store · App discovery</p>
+          <h1>Find apps.<br /><span>Search a keyword or app name.</span></h1>
+          <p className="lede">Explore listing matches for a market, problem, or known app. Discovery only—no saved research or review collection.</p>
         </div>
-        <section className="search-panel" aria-label="Keyword search">
-          <div className="search-context"><span className="eyebrow">Keyword</span><span>Storefront: <strong>{country?.name ?? "United States"} (US)</strong></span></div>
+        <section className="search-panel" aria-label="App discovery search">
+          <div className="search-context"><span className="eyebrow">{mode === "keyword" ? "Keyword" : "App name"}</span><span>Storefront: <strong>{country?.name ?? "United States"} (US)</strong></span></div>
           <form onSubmit={submit} noValidate autoComplete="off">
+            <fieldset className="search-modes">
+              <legend>Search mode</legend>
+              <label><input type="radio" name="mode" value="keyword" checked={mode === "keyword"} onChange={() => changeMode("keyword")} /> Keyword</label>
+              <label><input type="radio" name="mode" value="app-name" checked={mode === "app-name"} onChange={() => changeMode("app-name")} /> App name</label>
+            </fieldset>
             <label htmlFor="search">Search phrase</label>
             <div className="search-controls">
-              <input id="search" name="keyword" type="search" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="e.g. adhd planner" autoComplete="off" aria-describedby="search-help" aria-invalid={screen.kind === "error" && screen.code === "VALIDATION_ERROR"} />
+              <input id="search" name="query" type="search" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={mode === "keyword" ? "e.g. adhd planner" : "e.g. Tiimo"} autoComplete="off" aria-describedby="search-help" aria-invalid={screen.kind === "error" && screen.code === "VALIDATION_ERROR"} />
               <button type="submit" disabled={!country}>Search <span aria-hidden="true">↗</span></button>
             </div>
             <p id="search-help" className="help">2–100 characters. Search or press Enter to submit. Typing never searches.</p>
@@ -97,7 +120,9 @@ export default function Discovery() {
           <div role="status" aria-live="polite" aria-atomic="true" className="status-line">
             {screen.kind === "initial" && "Ready when you are. No search has been submitted."}
             {screen.kind === "loading" && `Searching “${screen.submitted.phrase}” in ${screen.submitted.country.name}…`}
-            {screen.kind === "success" && `${screen.data.results.length} displayed search results for “${screen.data.query}” in ${screen.submitted.country.name}.`}
+            {screen.kind === "success" && (confirmed
+              ? `Confirmed ${confirmed.name ?? `app ${confirmed.appId}`}. Showing only this app for “${screen.data.query}” in ${screen.submitted.country.name}.`
+              : `${screen.data.results.length} displayed ${mode === "app-name" ? "app candidates" : "search results"} for “${screen.data.query}” in ${screen.submitted.country.name}.`)}
           </div>
           {screen.kind === "initial" && <div className="empty-state"><span className="empty-marker" aria-hidden="true">01 / DISCOVER</span><h2>A phrase, then possibilities.</h2><p>Your matches will appear here in Apple’s returned order. Searches show up to 50 matches, not the entire App Store catalog.</p></div>}
           {screen.kind === "loading" && <div className="loading-lines" aria-hidden="true"><span /><span /><span /></div>}
@@ -109,12 +134,17 @@ export default function Discovery() {
             {screen.code !== "VALIDATION_ERROR" && <button type="button" className="secondary" onClick={() => void search(screen.submitted)}>Retry submitted search</button>}
           </div>}
           {screen.kind === "success" && <>
-            <div className="result-heading"><div><p className="eyebrow">{screen.submitted.country.name} · {screen.data.country.toUpperCase()}</p><h2>Matches for “{screen.data.query}”</h2></div><span className="result-count">{screen.data.results.length} displayed</span></div>
+            <div className="result-heading"><div><p className="eyebrow">{screen.submitted.country.name} · {screen.data.country.toUpperCase()}</p><h2 ref={resultHeading} tabIndex={-1}>{confirmed ? "Confirmed app" : `${mode === "app-name" ? "Candidates" : "Matches"} for “${screen.data.query}”`}</h2></div><span className="result-count">{displayed.length} displayed</span></div>
             <p className="result-note">Limited search matches · Up to 50 · Apple’s returned order, not a complete catalog.</p>
             <p className="result-note">Average ratings and rating counts belong to the {screen.submitted.country.name} ({screen.data.country.toUpperCase()}) storefront, not global totals. Ratings are not written reviews.</p>
+            {mode === "app-name" && (confirmed
+              ? <button type="button" className="secondary" onClick={() => confirm(null)}>Return to candidates</button>
+              : screen.data.results.length > 0 && <p className="candidate-help">Compare names and developers, then confirm the intended app. No candidate is automatically verified, even when only one is returned.</p>)}
             <p className="fetch-info">Metadata fetched <time dateTime={screen.data.fetchedAt}>{new Date(screen.data.fetchedAt).toLocaleString()}</time> · {screen.data.cached ? "Cached metadata" : "Fresh from Apple · Not cached"}</p>
             {screen.data.results.length === 0 ? <div className="empty-state"><h3>No matches in this storefront.</h3><p>Apple returned no usable app matches. Try another phrase; no other country was substituted.</p></div> : <ol className="results">
-              {screen.data.results.map((app) => <ListingRow key={app.appId} app={app} />)}
+              {displayed.map((app) => <ListingRow key={app.appId} app={app}>
+                {mode === "app-name" && !confirmed && <button type="button" onClick={() => confirm(app.appId)} aria-label={`Confirm ${app.name ?? `app ${app.appId}`} by ${app.developer ?? "unavailable developer"} (Apple app ID ${app.appId})`}>Confirm app</button>}
+              </ListingRow>)}
             </ol>}
           </>}
         </section>

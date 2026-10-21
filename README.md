@@ -1,6 +1,6 @@
 # Bibi — local App Store discovery
 
-Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15) and [#16](https://github.com/sanketsingh27/bibi/issues/16), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide local keyword discovery, listing metadata, and app-ID copying. `landing-page/` remains the existing informational site, unchanged.
+Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://github.com/sanketsingh27/bibi/issues/16), and [#17](https://github.com/sanketsingh27/bibi/issues/17), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide local keyword/app-name discovery, explicit confirmation, listing metadata, and app-ID copying. `landing-page/` remains the existing informational site, unchanged.
 
 ## Requirements and setup
 
@@ -36,13 +36,15 @@ The frontend's `.npmrc` disables dependency lifecycle scripts. The locked instal
 
 ## Searching
 
-The screen starts blank in the United States storefront. Type a market phrase, then use **Search** or **Enter**. Typing and focusing never search. Results retain Apple's returned order, show at most 50 matches, and are not a complete App Store catalog or a classified competitor set.
+The screen starts blank in **Keyword** mode in the United States storefront. Choose **Keyword** for a market phrase or **App name** for a known product, then use **Search** or **Enter**. Typing and focusing never search. Both modes use the same search endpoint with only `q`, `country`, and `limit`; mode is browser presentation, not inferred intent or an exact-title algorithm. Results retain Apple's returned order, show at most 50 matches, and are not a complete App Store catalog or a classified competitor set.
 
 Each row identifies the name, developer, numeric Apple ID, category, average rating (out of five), rating count, available icon, and original safe listing link. Missing information is marked unavailable. A missing rating is not a zero-star score; a genuine zero rating/count stays zero. Rating counts are ratings, not written reviews, and belong to the displayed country storefront rather than global totals. Loading, no matches, invalid input, rate limits, timeout, and upstream failure have separate states. Manual Retry repeats the failed submitted phrase/storefront even if the input contains a newer draft. A newer submission invalidates older responses, including when the newer input is invalid.
 
+In **App name** mode, compare candidate names and developers, then choose **Confirm app** on the intended listing. Even one candidate requires explicit confirmation; zero candidates remains no match. Confirmation shows only that listing. **Return to candidates** reuses the same fetched response without another request. Mode changes also make no request: they clear confirmation and expose the existing matches/candidates. New submissions (including invalid input) clear confirmation. Editing the draft alone leaves the submitted results and confirmation intact. Native radio controls, confirmation, and return are keyboard-operable; confirmation/return focus the result heading and announce status. Confirmation is not saved and triggers no review collection or research action.
+
 The submitted query/storefront, limited-match count, metadata fetch time and cache status belong to the displayed response. This ticket has **no metadata cache**: each successful search truthfully returns `cached=false`, including repeated and empty searches. There are no automatic retries, background searches, polling, queues, fallback data, saved browser search state, or search phrases in the page URL. Reload starts fresh. Browser requests and responses are not used as another metadata cache.
 
-App-name confirmation, the country-picker interaction, and metadata caching/request sharing belong to later tickets and are intentionally absent here.
+The country-picker interaction belongs to [#18](https://github.com/sanketsingh27/bibi/issues/18) and is intentionally absent here.
 
 ### Metadata, clipboard, and artwork
 
@@ -124,4 +126,12 @@ For [#16](https://github.com/sanketsingh27/bibi/issues/16), also verify:
 3. Through the same temporary `create_app(apple_transport=httpx.MockTransport(...))` runner described above, return missing optional metadata, null average with zero count, genuine zero average/count, unsafe artwork/listing URLs, a safe artwork URL without a safe listing link, and an unsafe 100px artwork URL with a safe 60px fallback. Confirm explicit unavailable states, preserved zeros, no executable unsafe links, and artwork only alongside an original-listing badge. Include HTML-like listing text and confirm literal text, not execution.
 4. Inspect narrow and wide layouts at 320/768/1024/1440px and the accessibility tree. Controlled upstream data is verification-only: never add a fixture endpoint, production fallback, or alternate UI test suite.
 
-Observed implementation evidence and final acceptance/integration status are recorded on [#15](https://github.com/sanketsingh27/bibi/issues/15). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.
+For [#17](https://github.com/sanketsingh27/bibi/issues/17), use this additional browser scenario (no separate UI/helper test suite):
+
+1. Keyboard-select **App name**, type `Tiimo` without submitting, and verify zero search traffic. Submit with Enter; compare the populated candidate names/developers and confirm the intended app. Verify only that listing appears.
+2. Keyboard-activate **Return to candidates** and verify no additional search request. Confirm again, switch to Keyword and back, and verify the same fetched set is exposed without a request or retained confirmation.
+3. Confirm a candidate, edit the draft, and verify the submitted identity/selection is unchanged. Submit another phrase and verify confirmation clears. Repeat with invalid input. Reload and verify blank input, Keyword mode, and no selection.
+4. Through the temporary controlled Apple transport runner described above, return exactly one candidate and then zero candidates. Verify the single result still requires confirmation and the empty set has no confirmation/return action or substituted product. With two candidates, confirm the second to rule out implicit first-result selection.
+5. Hold an older response behind an event, submit a newer phrase, and release the older response before its deadline. The newer result/confirmation must remain. Inspect browser requests for only `q`, `country`, `limit` and no mode, Lookup/review/AI calls, automatic retries, or confirmation requests. Check accessible labels, keyboard actions and responsive layouts.
+
+Observed implementation evidence and final acceptance/integration status are recorded on [#15](https://github.com/sanketsingh27/bibi/issues/15) and [#17](https://github.com/sanketsingh27/bibi/issues/17). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.

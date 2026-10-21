@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Listing } from "./api";
 
-export function ListingRow({ app }: { app: Listing }) {
+export function ListingRow({ app, children }: { app: Listing; children?: ReactNode }) {
   const [iconFailed, setIconFailed] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "pending" | "success" | "error">("idle");
   // Artwork is promotional content: never show it without its original listing badge.
@@ -36,6 +36,7 @@ export function ListingRow({ app }: { app: Listing }) {
       </p>
     </div>
     <div className="listing-artwork">
+      {children}
       {showIcon ? <img className="app-icon" src={app.iconUrl!} alt={`${app.name ?? `App ${app.appId}`} icon`} width="80" height="80" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} /> : <span className="icon-unavailable">{app.iconUrl && !app.storeUrl ? "Icon unavailable without a listing link" : "Icon unavailable"}</span>}
       {app.storeUrl ? <a className="store-badge" href={app.storeUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${app.name ?? `app ${app.appId}`} on the App Store (new tab)`}><img src="/download-on-the-app-store.svg" alt="Download on the App Store" width="120" height="40" /></a> : <span className="link-unavailable">Listing link unavailable</span>}
     </div>
