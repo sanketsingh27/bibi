@@ -1,0 +1,75 @@
+import asyncio
+import math
+from collections import deque
+from collections.abc import Callable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
+import httpx
+
+from .models import SearchResponse, normalize_results
+
+
+class SearchError(Exception):
+    def __init__(self, status: int, code: str, message: str, retry_after: str | None = None):
+        self.status = status
+        self.code = code
+        self.message = message
+        self.retry_after = retry_after
+
+
+def valid_retry_after(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value.isascii() and value.isdecimal():
+        return value
+    try:
+        parsed = parsedate_to_datetime(value)
+        if parsed.tzinfo is not None:
+            return value
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
+class SearchService:
+    def __init__(self, client: httpx.AsyncClient, clock: Callable[[], float]):
+        self.client = client
+        self.clock = clock
+        self.dispatched: deque[float] = deque()
+
+    async def search(self, query: str, country: str, limit: int) -> SearchResponse:
+        now = self.clock()
+        while self.dispatched and self.dispatched[0] <= now - 60:
+            self.dispatched.popleft()
+        if len(self.dispatched) >= 10:
+            raise SearchError(429, "SEARCH_RATE_LIMITED", "Search budget reached. Retry after the indicated wait.",
+                              str(max(1, math.ceil(self.dispatched[0] + 60 - now))))
+        # No await between checking and reserving: atomic in this single-worker event loop.
+        # Failures consume their reservation too. Identical requests do not share work yet.
+        self.dispatched.append(now)
+        try:
+            async with asyncio.timeout(8):
+                response = await self.client.get("https://itunes.apple.com/search", params={
+                    "term": query, "country": country, "limit": limit,
+                    "media": "software", "entity": "software", "lang": "en_us",
+                })
+                if response.status_code == 429:
+                    raise SearchError(429, "UPSTREAM_RATE_LIMITED", "Apple is limiting searches. Retry manually later.",
+                                      valid_retry_after(response.headers.get("retry-after")))
+                if not response.is_success:
+                    raise SearchError(502, "UPSTREAM_ERROR", "Apple search is unavailable. Retry manually.")
+                envelope = response.json()
+                if (not isinstance(envelope, dict) or type(envelope.get("resultCount")) is not int
+                        or envelope["resultCount"] < 0 or not isinstance(envelope.get("results"), list)
+                        or envelope["resultCount"] != len(envelope["results"])
+                        or any(not isinstance(record, dict) for record in envelope["results"])):
+                    raise ValueError("Malformed Apple envelope")
+                results = normalize_results(envelope["results"], country, limit)
+        except (TimeoutError, httpx.TimeoutException) as error:
+            raise SearchError(504, "UPSTREAM_TIMEOUT", "Apple search timed out. Retry manually.") from error
+        except (httpx.HTTPError, ValueError, UnicodeError) as error:
+            raise SearchError(502, "UPSTREAM_ERROR", "Apple search is unavailable. Retry manually.") from error
+        return SearchResponse(query=query, country=country,
+                              fetchedAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                              cached=False, results=results)

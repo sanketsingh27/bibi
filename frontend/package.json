@@ -1,0 +1,23 @@
+{
+  "name": "bibi-discovery",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22.0.0" },
+  "packageManager": "npm@11.21.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
