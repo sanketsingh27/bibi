@@ -1,6 +1,6 @@
 # Bibi — local App Store discovery
 
-Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://github.com/sanketsingh27/bibi/issues/16), [#17](https://github.com/sanketsingh27/bibi/issues/17), and [#19](https://github.com/sanketsingh27/bibi/issues/19), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide local keyword/app-name discovery, explicit confirmation, listing metadata, app-ID copying, transient metadata caching, and identical-request sharing. `landing-page/` remains the existing informational site, unchanged.
+Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://github.com/sanketsingh27/bibi/issues/16), [#17](https://github.com/sanketsingh27/bibi/issues/17), [#18](https://github.com/sanketsingh27/bibi/issues/18), and [#19](https://github.com/sanketsingh27/bibi/issues/19), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide local keyword/app-name discovery, storefront switching, explicit confirmation, listing metadata, app-ID copying, transient metadata caching, and identical-request sharing. `landing-page/` remains the existing informational site, unchanged.
 
 ## Requirements and setup
 
@@ -48,7 +48,7 @@ Cache identity includes the whitespace-normalized phrase (without case-folding o
 
 There are no automatic retries, background searches, polling, queues, fallback data, saved browser search state, or search phrases in the page URL. Browser/HTTP/Next.js response caching remains disabled; FastAPI is the only metadata cache. Only listing metadata and URLs are cached, never artwork files.
 
-The country-picker interaction belongs to [#18](https://github.com/sanketsingh27/bibi/issues/18) and is intentionally absent here.
+The labelled **Country storefront** picker loads readable names/codes from the backend catalog, initially selecting **United States (US)** with **India (IN)** available. Before any submission, changing country makes no search request. After a submission, it clears confirmation and reruns only the last submitted phrase in the new country, preserving unfinished input. The picker is outside the submission form so using Enter on it cannot submit a draft. Loading and errors identify their submitted phrase/country; old responses cannot replace newer identities. Empty or unavailable results never substitute another country or app. If the catalog cannot load, search and the picker remain disabled with an explicit error; reload after restoring the API. Reload resets to US, blank input, Keyword mode, and no confirmation.
 
 ### Metadata, clipboard, and artwork
 
@@ -144,6 +144,14 @@ For [#17](https://github.com/sanketsingh27/bibi/issues/17), use this additional 
 
 After confirmation, also verify the category, null/zero rating distinctions, copy success/failure, artwork, and linked badge remain available. Returning to candidates must preserve those controls and the response's fetch time/cache indicator without searching again.
 
+For [#18](https://github.com/sanketsingh27/bibi/issues/18), verify storefront transitions through the production app (`npm run build`, then `npm run start -- --hostname 127.0.0.1 --port 3000` from `frontend/`, with the documented single-worker API running):
+
+1. On a fresh page, type an unfinished phrase, keyboard-select India and press Enter while focused on the picker. Verify zero search requests, then return to US. Confirm the options match `/api/v1/apps/storefronts`; no unsupported code or silent fallback is offered.
+2. In App name mode, submit `Tiimo`, confirm a candidate, then type a different draft without submitting. Change to India: request `q=Tiimo&country=in&limit=50`, retain the draft, clear confirmation, and show only Indian candidates/metrics. Keyboard Enter on the picker must not submit the draft. Return to US, then India: cached metadata keeps each country's own fetch time/results.
+3. Using the temporary external Apple transport/clock runner described above, fail a submitted India search, edit the draft, then Retry. Observe the original failed phrase and `country=in`, not the draft. Return empty Indian results after populated US results and verify honest no-match with no confirmed app; fail an Indian request and verify its error context without US fallback.
+4. Hold an older US response behind an event, switch to India, confirm a newer candidate, then release the old response before its eight-second deadline. Repeat with a changed phrase/country and an older failure. Newest identity/confirmation must remain; an invalid latest submission must also invalidate old work. Use events, not timing sleeps, and retain dispatch order evidence.
+5. Reload: US, blank input, Keyword mode, no results/confirmation and no search parameters. Smoke Keyword/App name, local return, metadata/app-ID copy and per-country freshness together; check keyboard focus, accessible country/status labels, and 320/768/1024/1440px layouts.
+
 For #19's two-tab scenario, use that same temporary runner with a representative Apple response held behind an event. Submit the same uncached phrase from two browser tabs before releasing it; observe one Apple dispatch and identical `fetchedAt`/results with `cached=false` for both. Repeat with a held Apple failure: both tabs must receive the structured error, and a manual retry after recovery must make a new dispatch and succeed. Do not replace the search service or add a fixture endpoint. The offline API suite proves TTL/budget timing without waiting a day or exhausting Apple's live service.
 
-Implementation evidence and final acceptance/integration status are tracked on [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://github.com/sanketsingh27/bibi/issues/16), [#17](https://github.com/sanketsingh27/bibi/issues/17), and [#19](https://github.com/sanketsingh27/bibi/issues/19). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.
+Implementation evidence and final acceptance/integration status are tracked on [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://github.com/sanketsingh27/bibi/issues/16), [#17](https://github.com/sanketsingh27/bibi/issues/17), [#18](https://github.com/sanketsingh27/bibi/issues/18), and [#19](https://github.com/sanketsingh27/bibi/issues/19). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.

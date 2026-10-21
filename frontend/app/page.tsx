@@ -16,6 +16,7 @@ export default function Discovery() {
   const [confirmedId, setConfirmedId] = useState<number | null>(null);
   const resultHeading = useRef<HTMLHeadingElement | null>(null);
   const [country, setCountry] = useState<Storefront | null>(null);
+  const [storefronts, setStorefronts] = useState<Storefront[]>([]);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [screen, setScreen] = useState<Screen>({ kind: "initial" });
   const sequence = useRef(0);
@@ -29,6 +30,7 @@ export default function Discovery() {
         const catalog: Catalog = await response.json();
         const initial = catalog.storefronts.find((item) => item.code === catalog.defaultCountry);
         if (!initial || initial.code !== "us") throw new Error("US storefront unavailable");
+        setStorefronts(catalog.storefronts);
         setCountry(initial);
       })
       .catch(() => { if (!controller.signal.aborted) setCatalogFailed(true); });
@@ -70,6 +72,14 @@ export default function Discovery() {
     if (country) void search({ phrase: draft, country });
   }
 
+  function changeCountry(code: string) {
+    const next = storefronts.find((item) => item.code === code);
+    if (!next || next.code === country?.code) return;
+    setCountry(next);
+    setConfirmedId(null);
+    if (screen.kind !== "initial") void search({ phrase: screen.submitted.phrase, country: next });
+  }
+
   const error = screen.kind === "error" ? errorMessages[screen.code] : null;
   const confirmed = screen.kind === "success" && mode === "app-name"
     ? screen.data.results.find((app) => app.appId === confirmedId)
@@ -100,7 +110,15 @@ export default function Discovery() {
           <p className="lede">Explore listing matches for a market, problem, or known app. Discovery only—no saved research or review collection.</p>
         </div>
         <section className="search-panel" aria-label="App discovery search">
-          <div className="search-context"><span className="eyebrow">{mode === "keyword" ? "Keyword" : "App name"}</span><span>Storefront: <strong>{country?.name ?? "United States"} (US)</strong></span></div>
+          <div className="search-context"><span className="eyebrow">{mode === "keyword" ? "Keyword" : "App name"}</span><span>Storefront: <strong>{country ? `${country.name} (${country.code.toUpperCase()})` : catalogFailed ? "Unavailable" : "Loading catalog…"}</strong></span></div>
+          <div className="storefront-control">
+            <label htmlFor="country">Country storefront</label>
+            <select id="country" name="country" value={country?.code ?? ""} disabled={!country} onChange={(event) => changeCountry(event.target.value)} aria-describedby="country-help">
+              {!country && <option value="">{catalogFailed ? "Catalog unavailable" : "Loading storefronts…"}</option>}
+              {storefronts.map((item) => <option key={item.code} value={item.code}>{item.name} ({item.code.toUpperCase()})</option>)}
+            </select>
+            <p id="country-help" className="help">Changing storefront reruns only your last submitted phrase, not unfinished edits.</p>
+          </div>
           <form onSubmit={submit} noValidate autoComplete="off">
             <fieldset className="search-modes">
               <legend>Search mode</legend>
