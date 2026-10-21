@@ -52,7 +52,10 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
         # HTTPX verifies TLS by default, follows no redirects, and makes no automatic retries.
         async with httpx.AsyncClient(transport=apple_transport, timeout=8, follow_redirects=False) as client:
             app.state.search = SearchService(client, clock)
-            yield
+            try:
+                yield
+            finally:
+                await app.state.search.aclose()
 
     app = FastAPI(title="Bibi App discovery", lifespan=lifespan)
 

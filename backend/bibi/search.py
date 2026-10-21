@@ -10,6 +10,10 @@ import httpx
 from .models import SearchResponse, normalize_results
 
 
+SEARCH_PARAMETERS = (("media", "software"), ("entity", "software"), ("lang", "en_us"))
+type SearchKey = tuple[str, str, int, tuple[tuple[str, str], ...]]
+
+
 class SearchError(Exception):
     def __init__(self, status: int, code: str, message: str, retry_after: str | None = None):
         self.status = status
@@ -37,22 +41,56 @@ class SearchService:
         self.client = client
         self.clock = clock
         self.dispatched: deque[float] = deque()
+        self.cache: dict[SearchKey, tuple[float, SearchResponse]] = {}
+        self.pending: dict[SearchKey, asyncio.Task[SearchResponse]] = {}
 
     async def search(self, query: str, country: str, limit: int) -> SearchResponse:
+        key = (query, country, limit, SEARCH_PARAMETERS)
         now = self.clock()
+        entry = self.cache.get(key)
+        if entry is not None:
+            expires_at, response = entry
+            if now < expires_at:
+                return response.model_copy(update={"cached": True})
+            del self.cache[key]
+        task = self.pending.get(key)
+        if task is not None:
+            return await asyncio.shield(task)
         while self.dispatched and self.dispatched[0] <= now - 60:
             self.dispatched.popleft()
         if len(self.dispatched) >= 10:
             raise SearchError(429, "SEARCH_RATE_LIMITED", "Search budget reached. Retry after the indicated wait.",
                               str(max(1, math.ceil(self.dispatched[0] + 60 - now))))
-        # No await between checking and reserving: atomic in this single-worker event loop.
-        # Failures consume their reservation too. Identical requests do not share work yet.
+        # No await between checking cache/pending/budget and reserving shared work:
+        # atomic in this single-worker event loop. Failed attempts also consume a slot.
         self.dispatched.append(now)
+        task = asyncio.create_task(self._fetch(key))
+        self.pending[key] = task
+        # A disconnected caller must not cancel work shared by other tabs.
+        # Retrieve failures even if every waiter disconnects before completion.
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        return await asyncio.shield(task)
+
+    async def aclose(self) -> None:
+        tasks = list(self.pending.values())
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _fetch(self, key: SearchKey) -> SearchResponse:
+        try:
+            response = await self._request(*key[:3])
+            self.cache[key] = (self.clock() + 86400, response)
+            return response
+        finally:
+            del self.pending[key]
+
+    async def _request(self, query: str, country: str, limit: int) -> SearchResponse:
         try:
             async with asyncio.timeout(8):
                 response = await self.client.get("https://itunes.apple.com/search", params={
                     "term": query, "country": country, "limit": limit,
-                    "media": "software", "entity": "software", "lang": "en_us",
+                    **dict(SEARCH_PARAMETERS),
                 })
                 if response.status_code == 429:
                     raise SearchError(429, "UPSTREAM_RATE_LIMITED", "Apple is limiting searches. Retry manually later.",

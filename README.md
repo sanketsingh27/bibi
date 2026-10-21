@@ -1,6 +1,6 @@
 # Bibi — local App Store discovery
 
-Ticket [#15](https://github.com/sanketsingh27/bibi/issues/15), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), adds a separate local keyword-discovery application. `landing-page/` remains the existing informational site, unchanged.
+Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15) and [#19](https://github.com/sanketsingh27/bibi/issues/19), under [spec #14](https://github.com/sanketsingh27/bibi/issues/14), provide a separate local keyword-discovery application with transient metadata caching and identical-request sharing. `landing-page/` remains the existing informational site, unchanged.
 
 ## Requirements and setup
 
@@ -30,7 +30,7 @@ Open **http://127.0.0.1:3000**. To exercise the production frontend instead of t
 npm run start -- --hostname 127.0.0.1 --port 3000
 ```
 
-The API must remain running. These commands deliberately bind both applications to loopback. One backend worker/process is required: multiple workers or public hosting are unsupported because the request budget is process-local. Restarting the API clears that budget.
+The API must remain running. These commands deliberately bind both applications to loopback. One backend worker/process is required: multiple workers or public hosting are unsupported because the cache, pending operations, and request budget are process-local. Restarting the API clears all three.
 
 The frontend's `.npmrc` disables dependency lifecycle scripts. The locked install and Next.js build work with scripts disabled; do not blanket-enable installation scripts. `backend/uv.lock` and `frontend/package-lock.json` pin each independent installation boundary.
 
@@ -40,9 +40,13 @@ The screen starts blank in the United States storefront. Type a market phrase, t
 
 Each row identifies the name, developer, numeric Apple ID, and original safe listing link. Missing information is marked unavailable. Loading, no matches, invalid input, rate limits, timeout, and upstream failure have separate states. Manual Retry repeats the failed submitted phrase/storefront even if the input contains a newer draft. A newer submission invalidates older responses, including when the newer input is invalid.
 
-The submitted query/storefront, limited-match count, metadata fetch time and cache status belong to the displayed response. This ticket has **no metadata cache**: each successful search truthfully returns `cached=false`, including repeated and empty searches. There are no automatic retries, background searches, polling, queues, fallback data, saved browser search state, or search phrases in the page URL. Reload starts fresh. Browser requests and responses are not used as another metadata cache.
+The submitted query/storefront, limited-match count, metadata fetch time and cache status belong to the displayed response. FastAPI caches successful normalized metadata, including empty results, for **24 hours from successful fetch completion**. Repeating a fresh search displays **Cached metadata**, with its original fetch time. New upstream fetches and callers joining an identical pending operation display **Fresh from Apple · Not cached**. Reload clears the page, not the running backend's cache.
 
-App-name confirmation, the country-picker interaction, icon/category/ratings/copy UI, and metadata caching/request sharing belong to later tickets and are intentionally absent here. The API already supplies their complete normalized metadata contract and storefront catalog.
+Cache identity includes the whitespace-normalized phrase (without case-folding or rewriting), country, limit, and fixed Apple search parameters. Countries and limits remain isolated. At exactly 24 hours, the entry expires; a cache hit never extends its lifetime. Expired results are not returned after a failed refresh. Failures are not cached; retry requires an explicit new submission and is still subject to the budget.
+
+There are no automatic retries, background searches, polling, queues, fallback data, saved browser search state, or search phrases in the page URL. Browser/HTTP/Next.js response caching remains disabled; FastAPI is the only metadata cache. Only listing metadata and URLs are cached, never artwork files.
+
+App-name confirmation, the country-picker interaction, and icon/category/ratings/copy UI belong to separate tickets and are intentionally absent here. The API already supplies their complete normalized metadata contract and storefront catalog.
 
 ## API
 
@@ -76,7 +80,9 @@ Non-software records and invalid IDs are filtered. The first usable record per I
 
 ### Budget and failure contract
 
-The single process reserves at most **10 dispatched attempts in a rolling 60 seconds**, including failures and simultaneous requests. It rejects excess work immediately before dispatch. Every Apple operation has an **8-second overall deadline**, including reading the body, with TLS verification and no automatic retries or redirect following. Identical searches do not share an attempt in this ticket.
+The single process reserves at most **10 dispatched attempts in a rolling 60 seconds**, including failures and simultaneous requests. It checks fresh cache first, then joins identical pending work, then reserves budget for a new dispatch. Hits and joiners use no new slot and still work while the budget is exhausted; a different uncached identity is rejected immediately. Every shared Apple operation has an **8-second overall deadline**, including reading the body, with TLS verification and no automatic retries or redirect following.
+
+Identical concurrent misses share one Apple operation and receive the same success or structured failure. Joiners receive `cached=false`, not a cache hit. Completion or failure removes pending work so a later manual retry can proceed. A disconnected browser caller does not cancel work needed by other tabs; application shutdown cancels any abandoned pending operation before closing the Apple client.
 
 Errors have one shape: `{error: {code, message}}`. Messages never expose raw upstream bodies or exceptions. API responses include `Cache-Control: no-store`.
 
@@ -92,7 +98,7 @@ FastAPI's generated schema is at http://127.0.0.1:8000/docs.
 
 ## Verification
 
-From `backend/`, with `.venv` activated, `python -m pytest` runs the offline behavioral API suite. It uses the real FastAPI boundary/service and controls only the Apple HTTPX transport and time. Tests cover input/catalog agreement, ordering/filtering/deduplication/capping, nullable metadata and safe URLs, empty versus malformed results, failures/429/timeout, failed-attempt accounting, exact rolling-window boundaries, concurrent reservations, and the overall deadline during a blocked body read. There is no separate helper/UI unit-test seam.
+From `backend/`, with `.venv` activated, `python -m pytest` runs the offline behavioral API suite. It uses the real FastAPI boundary/service and controls only the Apple HTTPX transport and time. Tests cover input/catalog agreement, ordering/filtering/deduplication/capping, nullable metadata and safe URLs, empty versus malformed results, failures/429/timeout, failed-attempt accounting, exact rolling-window and 24-hour boundaries, country/limit/case/whitespace identity, shared success/failure, manual recovery without stale fallback, cache/join precedence under exhausted budget, fresh application reset, disconnect/shutdown handling, and the overall deadline during a blocked body read. Concurrency uses deterministic events and controlled clock reads, not sleeps. There is no separate helper/UI unit-test seam.
 
 From `frontend/`, run `npm run build` and `npm audit`. From the repository root, with both servers running:
 
@@ -104,9 +110,11 @@ curl --fail-with-body 'http://127.0.0.1:8000/api/v1/apps/storefronts'
 Browser runtime acceptance is separate from the suite/build:
 
 1. Open the blank US-scoped screen. Focus/type `adhd planner` and confirm no search request in browser Network. Submit using Search, then submit another phrase using Enter. Observe actual populated Apple results, not a fixed expected count.
-2. Open an original listing; verify navigation to Apple's listing and no review/research work. Check the limited-match count, submitted phrase/storefront and fresh/not-cached timestamp. Repeat a search; it must make another attempt, subject to the budget.
+2. Open an original listing; verify navigation to Apple's listing and no review/research work. Check the limited-match count, submitted phrase/storefront and fresh/not-cached timestamp. Repeat `adhd planner`: observe `cached=true`, unchanged `fetchedAt`, **Cached metadata**, and no second Apple dispatch. Reload: the screen resets, but resubmitting still hits the backend cache. Stop/restart only your API process with the documented command; the next search must fetch again with `cached=false`.
 3. Submit rapidly changing phrases. Older responses must not overwrite the newer submission. Reload and confirm blank input, no result rows, US context and no page search parameters.
 4. For deterministic failures, wrap the real `create_app(apple_transport=..., clock=...)` in a **temporary local-only runner** using `httpx.MockTransport`, as the API tests do. Start that runner on port 8000 instead of the live backend, leaving the real Next.js path unchanged. Exercise successful empty, invalid query, Apple 429 with/without Retry-After, 503, and a blocked operation hitting the real 8-second deadline. Do not add fixture endpoints or fallbacks to the application.
 5. In that controlled runner, hold an older response behind an event, complete a newer search, then release the old response. Fail a submitted phrase, edit the draft, and use Retry: the request must still contain the failed phrase. Admit ten controlled dispatches (including failures), observe the next local 429 without an eleventh Apple dispatch, advance the controlled clock and retry manually. Inspect network/dispatch logs for no automatic retries. Check keyboard operation and 320/768/1024/1440px layouts.
 
-Observed implementation evidence and final acceptance/integration status are recorded on [#15](https://github.com/sanketsingh27/bibi/issues/15). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.
+For #19's two-tab scenario, use that same temporary runner with a representative Apple response held behind an event. Submit the same uncached phrase from two browser tabs before releasing it; observe one Apple dispatch and identical `fetchedAt`/results with `cached=false` for both. Repeat with a held Apple failure: both tabs must receive the structured error, and a manual retry after recovery must make a new dispatch and succeed. Do not replace the search service or add a fixture endpoint. The offline API suite proves TTL/budget timing without waiting a day or exhausting Apple's live service.
+
+Implementation evidence and final acceptance/integration status are tracked on [#15](https://github.com/sanketsingh27/bibi/issues/15) and [#19](https://github.com/sanketsingh27/bibi/issues/19). Live counts and catalog ordering change over time; an upstream failure or zero matches is not proof of the populated flow.

@@ -245,7 +245,7 @@ async def test_concurrent_dispatches_reserve_slots_before_waiting_for_apple():
         await release.wait()
         return payload([])
     async with api(apple) as client:
-        tasks = [asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "same phrase"})) for _ in range(10)]
+        tasks = [asyncio.create_task(client.get("/api/v1/apps/search", params={"q": f"phrase {index}"})) for index in range(10)]
         try:
             await asyncio.wait_for(entered.wait(), 2)
             rejected = await client.get("/api/v1/apps/search", params={"q": "overflow"})
@@ -281,3 +281,257 @@ async def test_overall_eight_second_deadline_includes_response_body(monkeypatch)
     assert response.status_code == 504
     assert response.json()["error"]["code"] == "UPSTREAM_TIMEOUT"
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("records", [[], [listing(7, trackName="Fetched listing")]])
+async def test_fresh_repeat_caches_success_including_empty_and_preserves_fetch_time(records):
+    now = [0.0]
+    calls = []
+    def apple(request):
+        calls.append(request)
+        return payload(records)
+    async with api(apple, clock=lambda: now[0]) as client:
+        first = await client.get("/api/v1/apps/search", params={"q": "adhd planner"})
+        now[0] = 24 * 60 * 60 - 0.001
+        repeat = await client.get("/api/v1/apps/search", params={"q": "adhd planner"})
+    assert first.status_code == repeat.status_code == 200
+    assert first.json()["cached"] is False
+    assert repeat.json() == {**first.json(), "cached": True}
+    assert len(calls) == 1
+    assert repeat.headers["cache-control"] == "no-store"
+
+
+async def test_ttl_starts_at_success_and_exact_boundary_refreshes_without_stale_fallback():
+    now = [0.0]
+    calls = []
+    def apple(request):
+        calls.append(request)
+        if len(calls) == 1:
+            now[0] = 7.0  # Time spent fetching does not shorten the cache lifetime.
+        if len(calls) == 2:
+            return httpx.Response(503)
+        return payload([listing(len(calls))])
+    async with api(apple, clock=lambda: now[0]) as client:
+        first = await client.get("/api/v1/apps/search", params={"q": "planner"})
+        now[0] = 86406.999
+        fresh = await client.get("/api/v1/apps/search", params={"q": "planner"})
+        assert fresh.json() == {**first.json(), "cached": True}
+        now[0] = 86407.0
+        failed = await client.get("/api/v1/apps/search", params={"q": "planner"})
+        assert failed.status_code == 502
+        assert "results" not in failed.json()
+        recovered = await client.get("/api/v1/apps/search", params={"q": "planner"})
+        assert recovered.status_code == 200
+        assert recovered.json()["cached"] is False
+        assert recovered.json()["results"][0]["appId"] == 3
+    assert len(calls) == 3
+
+
+async def test_identity_normalizes_whitespace_but_isolates_case_country_and_limit():
+    calls = []
+    def apple(request):
+        calls.append(request)
+        return payload([listing(len(calls), trackName=request.url.params["term"])])
+    async with api(apple) as client:
+        first = await client.get("/api/v1/apps/search", params={"q": "  ADHD\tplanner\n"})
+        equivalent = await client.get("/api/v1/apps/search", params={"q": "ADHD  planner", "country": " US ", "limit": 50})
+        assert equivalent.json() == {**first.json(), "cached": True}
+        for params in [
+            {"q": "adhd planner"}, {"q": "ADHD planner", "country": "in"},
+            {"q": "ADHD planner", "limit": 1},
+        ]:
+            separate = await client.get("/api/v1/apps/search", params=params)
+            assert separate.status_code == 200
+            assert separate.json()["cached"] is False
+            assert separate.json()["results"][0]["appId"] != first.json()["results"][0]["appId"]
+    assert len(calls) == 4
+
+
+@pytest.mark.parametrize("failure", [None, 503, 429, "malformed", "timeout"])
+async def test_identical_pending_callers_share_outcome_and_failed_work_allows_manual_retry(failure):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    joined = asyncio.Event()
+    reads = [0]
+    calls = []
+    def clock():
+        reads[0] += 1
+        if reads[0] == 2:
+            joined.set()
+        return 0.0
+    async def apple(request):
+        calls.append(request)
+        if len(calls) == 1:
+            started.set()
+            await release.wait()
+            if failure == "timeout":
+                raise httpx.ReadTimeout("controlled timeout")
+            if failure == "malformed":
+                return httpx.Response(200, content="invalid json")
+            if failure is not None:
+                return httpx.Response(failure, headers={"Retry-After": "17"})
+        return payload([listing(9)])
+    async with api(apple, clock=clock) as client:
+        first = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "same phrase"}))
+        await asyncio.wait_for(started.wait(), 2)
+        second = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "same phrase"}))
+        try:
+            # The clock is controlled at the API seam. Once this read occurs,
+            # the second request reaches its first await while Apple is held.
+            await asyncio.wait_for(joined.wait(), 2)
+            assert len(calls) == 1
+        finally:
+            release.set()
+            responses = await asyncio.gather(first, second)
+        assert responses[0].status_code == responses[1].status_code
+        assert responses[0].json() == responses[1].json()
+        if failure is None:
+            assert responses[0].status_code == 200
+            assert responses[0].json()["cached"] is False
+        else:
+            assert responses[0].status_code == (504 if failure == "timeout" else 429 if failure == 429 else 502)
+            assert "results" not in responses[0].json()
+            retry = await client.get("/api/v1/apps/search", params={"q": "same phrase"})
+            assert retry.status_code == 200
+            assert retry.json()["cached"] is False
+            assert len(calls) == 2
+
+
+async def test_cache_and_pending_join_precede_exhausted_budget():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    joined = asyncio.Event()
+    observe_join = [False]
+    calls = []
+    def clock():
+        if observe_join[0]:
+            joined.set()
+        return 0.0
+    async def apple(request):
+        calls.append(request)
+        if request.url.params["term"] == "pending phrase":
+            started.set()
+            await release.wait()
+        return payload([listing(len(calls))])
+    async with api(apple, clock=clock) as client:
+        cached = await client.get("/api/v1/apps/search", params={"q": "cached phrase"})
+        for index in range(8):
+            assert (await client.get("/api/v1/apps/search", params={"q": f"other {index}"})).status_code == 200
+        pending = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "pending phrase"}))
+        await asyncio.wait_for(started.wait(), 2)
+        assert (await client.get("/api/v1/apps/search", params={"q": "overflow"})).status_code == 429
+        hit = await client.get("/api/v1/apps/search", params={"q": "cached phrase"})
+        assert hit.json() == {**cached.json(), "cached": True}
+        observe_join[0] = True
+        joiner = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "pending phrase"}))
+        try:
+            await asyncio.wait_for(joined.wait(), 2)
+            assert len(calls) == 10
+        finally:
+            release.set()
+            responses = await asyncio.gather(pending, joiner)
+        assert all(response.status_code == 200 and response.json()["cached"] is False for response in responses)
+        assert responses[0].json() == responses[1].json()
+        assert (await client.get("/api/v1/apps/search", params={"q": "still full"})).status_code == 429
+    assert len(calls) == 10
+
+
+async def test_new_application_resets_cache_pending_and_budget():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+    async def apple(request):
+        calls.append(request)
+        if request.url.params["term"] == "held phrase" and not started.is_set():
+            started.set()
+            await release.wait()
+        return payload([listing(len(calls))])
+    async with api(apple) as original:
+        await original.get("/api/v1/apps/search", params={"q": "warm phrase"})
+        for index in range(8):
+            await original.get("/api/v1/apps/search", params={"q": f"other {index}"})
+        pending = asyncio.create_task(original.get("/api/v1/apps/search", params={"q": "held phrase"}))
+        await asyncio.wait_for(started.wait(), 2)
+        try:
+            assert (await original.get("/api/v1/apps/search", params={"q": "overflow"})).status_code == 429
+            async with api(apple) as restarted:
+                warm = await restarted.get("/api/v1/apps/search", params={"q": "warm phrase"})
+                held = await restarted.get("/api/v1/apps/search", params={"q": "held phrase"})
+                assert warm.status_code == held.status_code == 200
+                assert warm.json()["cached"] is held.json()["cached"] is False
+                assert not pending.done()
+        finally:
+            release.set()
+            await pending
+    assert len(calls) == 12
+
+
+async def test_exact_expiry_refreshes_success_instead_of_extending_on_cache_hit():
+    now = [0.0]
+    calls = []
+    def apple(request):
+        calls.append(request)
+        return payload([listing(len(calls))])
+    async with api(apple, clock=lambda: now[0]) as client:
+        await client.get("/api/v1/apps/search", params={"q": "planner"})
+        now[0] = 86399.0
+        assert (await client.get("/api/v1/apps/search", params={"q": "planner"})).json()["cached"] is True
+        now[0] = 86400.0
+        refreshed = await client.get("/api/v1/apps/search", params={"q": "planner"})
+        assert refreshed.status_code == 200
+        assert refreshed.json()["cached"] is False
+        assert refreshed.json()["results"][0]["appId"] == 2
+    assert len(calls) == 2
+
+
+async def test_disconnected_caller_does_not_cancel_shared_work_for_another_tab():
+    started = asyncio.Event()
+    joined = asyncio.Event()
+    release = asyncio.Event()
+    reads = [0]
+    calls = []
+    def clock():
+        reads[0] += 1
+        if reads[0] == 2:
+            joined.set()
+        return 0.0
+    async def apple(request):
+        calls.append(request)
+        started.set()
+        await release.wait()
+        return payload([listing(11)])
+    async with api(apple, clock=clock) as client:
+        first = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "same phrase"}))
+        await asyncio.wait_for(started.wait(), 2)
+        second = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "same phrase"}))
+        try:
+            await asyncio.wait_for(joined.wait(), 2)
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+        finally:
+            release.set()
+            response = await second
+        assert response.status_code == 200
+        assert response.json()["cached"] is False
+        repeat = await client.get("/api/v1/apps/search", params={"q": "same phrase"})
+        assert repeat.json() == {**response.json(), "cached": True}
+    assert len(calls) == 1
+
+
+async def test_application_shutdown_cancels_abandoned_pending_apple_operation():
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    async def apple(request):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+    async with api(apple) as client:
+        task = asyncio.create_task(client.get("/api/v1/apps/search", params={"q": "held phrase"}))
+        await asyncio.wait_for(started.wait(), 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert stopped.is_set()
