@@ -1,0 +1,14 @@
+{
+  // Static landing page only: no audit API, signup storage, or analytics.
+  // From repository root: npm --prefix landing-page run dev (or build/deploy).
+  // Content: public/index.html. Styles: src/styles.css (compiled into public/).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bibi-landing",
+  "account_id": "ac9eebbef1b6778a2e25f38cea35a1a9",
+  "compatibility_date": "2026-10-21",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "404-page"
+  }
+}

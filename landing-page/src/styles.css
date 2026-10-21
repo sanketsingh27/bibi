@@ -1,0 +1,95 @@
+@import "tailwindcss";
+@source "../public/*.html";
+
+@font-face {
+  font-family: "Geist";
+  src: url("/geist-latin.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --color-paper: #f8faf9;
+  --color-ink: #222c27;
+  --color-muted: #5f6b64;
+  --color-line: #dce3df;
+  --color-accent: #3e6955;
+  --color-mist: #eef3ef;
+  --color-forest: #203d32;
+  --color-sage: #bdd3c5;
+}
+
+@layer base {
+  html { scroll-behavior: smooth; scroll-padding-top: 2rem; }
+  body { min-width: 320px; }
+  ::selection { background: #d4e4d9; color: #203d32; }
+  button, summary, a { -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid #3e6955; outline-offset: 5px; border-radius: 3px; }
+  .audit-section :focus-visible { outline-color: #bdd3c5; }
+  [hidden] { display: none !important; }
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+}
+
+@layer components {
+  .wordmark { @apply inline-flex items-baseline text-4xl font-semibold tracking-[-0.07em]; }
+  .brand-dot { @apply ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent; }
+  .eyebrow { @apply text-[11px] font-medium tracking-[0.13em] uppercase; }
+  .mono-label { @apply font-mono text-[10px] leading-relaxed tracking-[0.06em] text-muted; }
+  .section-title { @apply text-3xl leading-[1.14] font-medium tracking-[-0.045em] lg:text-[2.65rem]; }
+  .section-space { @apply py-16 md:py-24; }
+  .launch-link { @apply inline-flex min-h-11 items-center gap-2.5 rounded-full border border-line px-4 text-[11px] font-medium sm:text-xs; }
+  .status-dot { @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent; }
+  .nav-link { @apply items-center gap-2 text-muted hover:text-ink; }
+  .button { @apply inline-flex min-h-13 items-center justify-between gap-8 rounded-md px-6 py-3.5 text-sm font-medium; transition: transform 200ms cubic-bezier(0.16,1,0.3,1); }
+  .button-primary { @apply bg-accent text-white hover:bg-forest; }
+  .button:hover { transform: translateY(-2px); }
+  .button:active, .audit-tab:active { transform: scale(0.98); }
+  .research-sheet { box-shadow: 0 20px 45px -25px #203d3229, 0 4px 12px -8px #203d3220; }
+  .folder-tab { position: relative; }
+  .research-scene::before { content: ""; position: absolute; inset: 4.5rem 0.75rem 3.5rem; border: 1px solid var(--color-line); border-radius: 0.75rem; background: var(--color-mist); transform: rotate(3deg); }
+  .note-pin { @apply absolute -left-[3px] top-1 h-[5px] w-[5px] rounded-full bg-accent; }
+  .highlight-text { background: linear-gradient(transparent 55%, #dfebe2 55%); }
+  .step-number { @apply inline-flex h-9 w-9 items-center justify-center rounded-full border border-line font-mono text-xs; }
+  .audit-tab { @apply min-h-11 rounded-full border border-white/25 px-4 py-2.5 text-xs font-medium text-white/75; transition: transform 200ms cubic-bezier(0.16,1,0.3,1); }
+  .audit-tab:hover { @apply border-sage text-white; }
+  .audit-tab[aria-selected="true"] { @apply border-sage bg-sage text-forest; }
+  .audit-panel { min-height: 18rem; }
+  .audit-panel:not([hidden]) { animation: panel-enter 300ms cubic-bezier(0.16,1,0.3,1) both; }
+  .faq summary { @apply flex min-h-16 cursor-pointer items-center justify-between gap-6 py-5 text-sm font-medium; }
+  .faq p { @apply max-w-[60ch] pb-6 pr-4 text-sm leading-relaxed text-muted; }
+  .faq-plus { @apply text-xl font-normal text-muted; transition: transform 200ms cubic-bezier(0.16,1,0.3,1); }
+  .faq[open] .faq-plus { transform: rotate(45deg); }
+  .text-link:hover { text-decoration: underline; text-underline-offset: 5px; }
+  .skip-link { @apply fixed top-3 left-3 z-50 rounded-md bg-ink px-5 py-3 text-sm text-white; transform: translateY(-200%); }
+  .skip-link:focus { transform: translateY(0); }
+  .arrived { animation: arrive 650ms cubic-bezier(0.16,1,0.3,1) both; }
+}
+
+@keyframes arrive {
+  from { transform: translateY(14px); }
+  to { transform: translateY(0); }
+}
+@keyframes panel-enter {
+  from { transform: translateY(5px); }
+  to { transform: translateY(0); }
+}
+@media (max-width: 767px) {
+  .research-scene { max-width: 34rem; width: 100%; margin-inline: auto; }
+  .audit-panel { min-height: 32rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .button:hover, .button:active, .audit-tab:active { transform: none; }
+}
+@media print {
+  body { background: white; }
+  header nav, .button, #audit-tabs, .skip-link { display: none; }
+  .audit-panel[hidden] { display: grid !important; }
+  .reveal { animation: none; }
+  .audit-section { background: #203d32 !important; print-color-adjust: exact; }
+}

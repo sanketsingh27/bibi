@@ -1,0 +1,17 @@
+{
+  "name": "bibi-landing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bibi informational landing page for founders and product managers.",
+  "scripts": {
+    "build": "tailwindcss -i src/styles.css -o public/styles.css --minify",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "wrangler": "^4.151.3"
+  }
+}
