@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorMessages, normalizedQuery, type Catalog, type SearchIdentity, type SearchResponse, type Storefront } from "./api";
+import { Settings } from "./settings";
 import { ListingRow } from "./listing-row";
 
 type Screen =
@@ -166,6 +167,7 @@ export default function Discovery() {
             </ol>}
           </>}
         </section>
+        <Settings />
         <footer>Listing discovery, nothing more. Searches are not saved; reload to start fresh.<br />Apple, the Apple logo, and App Store are trademarks of Apple Inc., registered in the U.S. and other countries.</footer>
       </main>
     </>

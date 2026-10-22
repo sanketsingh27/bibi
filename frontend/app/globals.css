@@ -91,6 +91,12 @@ h3 { font-size: 16px; font-weight: 600; margin: 0; }
 .loading-lines span:nth-child(2) { width: 85%; }
 .loading-lines span:nth-child(3) { width: 70%; }
 footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 20px; font-size: 11px; color: var(--muted); }
+.settings-panel { margin-top: 48px; padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.settings-panel .eyebrow { margin-bottom: 8px; }
+.settings-panel h2 { margin-top: 0; }
+.settings-copy, .settings-status { color: var(--muted); font-size: 13px; }
+.settings-status { min-height: 24px; }
+.settings-panel .secondary { margin-top: 12px; }
 .skip-link { position: absolute; top: 8px; left: 8px; padding: 12px; color: white; background: var(--forest); transform: translateY(-200%); }
 .skip-link:focus { transform: translateY(0); }
 @media (max-width: 600px) {

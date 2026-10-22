@@ -62,7 +62,13 @@ Icons load directly in the browser from normalized HTTPS artwork URLs; the backe
 
 ## API
 
-The browser uses same-origin `/api/v1/apps/*`; Next.js rewrites that fixed path to `http://127.0.0.1:8000`. Only FastAPI calls `https://itunes.apple.com/search`. No caller-supplied upstream URL, Apple Lookup calls, reviews, or AI work is supported. External App Store links are ordinary navigation, not API searches.
+The browser uses same-origin `/api/v1/apps/*` and `/api/v1/ai/*`; Next.js rewrites both fixed paths to the local FastAPI server at `http://127.0.0.1:8000`. FastAPI calls Apple's fixed search endpoint and stores the OpenRouter key only in the macOS Keychain. There are no caller-supplied upstream URLs, Apple Lookup calls, review fetches, model catalog, or inference operations in this slice. External App Store links are ordinary navigation, not API searches.
+
+### Secure OpenRouter key Settings
+
+The Settings panel accepts one write-only OpenRouter key, replaces it, and removes it. The backend stores it under the app-owned `Bibi OpenRouter` Keychain service; it never uses a file or browser-storage fallback. `GET /api/v1/ai/settings` returns only `hasKey`, `selectedModelId` (`null` in this slice), and `storeStatus` (`available` or `unavailable`). `PUT /api/v1/ai/settings` accepts only `apiKey`; `DELETE /api/v1/ai/key` is idempotent. Locked or unavailable Keychain operations return `CREDENTIAL_STORE_UNAVAILABLE`; rejected local mutation contexts return `LOCAL_REQUEST_FORBIDDEN`. Saving, checking, or removing the key makes no inference request. Model selection and inference are separate tickets.
+
+Credential mutations require a loopback Host and reject hostile Origin or Fetch Metadata before request-body validation. Start the API and frontend using the commands above; the Keychain must be available on macOS. Do not enter a real key when exercising test flows; the offline API tests use an isolated in-memory credential store.
 
 ### `GET /api/v1/apps/storefronts`
 
