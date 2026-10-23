@@ -1,4 +1,7 @@
 import asyncio
+import hashlib
+import json
+import re
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -6,20 +9,14 @@ from email.utils import parsedate_to_datetime
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .search import SearchError, SearchService, valid_retry_after
 from .storefronts import STOREFRONTS
 
 
-class ReviewFetchInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    requestId: str = Field(min_length=1, max_length=128)
-    country: str
-    targetCount: Literal[200, 500]
-
-
 class ReviewRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     reviewId: str
     appId: int
     country: str
@@ -29,6 +26,78 @@ class ReviewRecord(BaseModel):
     updatedAt: str
     version: str | None
     fetchedAt: str
+
+    @model_validator(mode="after")
+    def valid_review(self):
+        if (not self.reviewId.strip() or len(self.reviewId) > 256 or not self.text.strip()
+                or len(self.text) > 100_000 or not 1 <= self.stars <= 5
+                or not 0 < self.appId <= 9007199254740991
+                or not re.fullmatch(r"[a-z]{2}", self.country)):
+            raise ValueError("invalid saved review record")
+        for value in (self.updatedAt, self.fetchedAt):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("review timestamps must include a timezone")
+        return self
+
+
+class ReviewPageObservations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    completedPages: list[int] = Field(max_length=10)
+    pageGaps: list[int] = Field(max_length=10)
+    pagesAttempted: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def valid_pages(self):
+        if (len(set(self.completedPages)) != len(self.completedPages)
+                or len(set(self.pageGaps)) != len(self.pageGaps)
+                or any(not 1 <= page <= 10 for page in [*self.completedPages, *self.pageGaps])
+                or not set(self.pageGaps) <= set(self.completedPages)
+                or self.pagesAttempted < len(self.completedPages)):
+            raise ValueError("invalid review page observations")
+        return self
+
+
+class ReviewSample(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    appId: int = Field(gt=0, le=9007199254740991)
+    country: str = Field(pattern=r"^[a-z]{2}$")
+    reviews: list[ReviewRecord] = Field(max_length=500)
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    pageObservations: ReviewPageObservations
+
+    @model_validator(mode="after")
+    def valid_sample(self):
+        ids = [record.reviewId for record in self.reviews]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate review IDs")
+        if self.reviews and not self.pageObservations.completedPages:
+            raise ValueError("saved reviews require completed page observations")
+        if any(record.appId != self.appId or record.country != self.country for record in self.reviews):
+            raise ValueError("review scope does not match sample")
+        expected = review_fingerprint(self.appId, self.country, self.reviews)
+        if self.fingerprint != expected:
+            raise ValueError("review sample fingerprint does not match content")
+        return self
+
+
+def review_fingerprint(app_id: int, country: str, reviews: list[ReviewRecord]) -> str:
+    entries = [{key: getattr(review, key) for key in
+                ("reviewId", "appId", "country", "title", "text", "stars", "updatedAt", "version")}
+               for review in reviews]
+    entries.sort(key=lambda record: record["reviewId"])
+    canonical = json.dumps({"appId": app_id, "country": country, "reviews": entries},
+                          ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class ReviewFetchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requestId: str = Field(min_length=1, max_length=128)
+    country: str
+    targetCount: Literal[200, 500]
+    refresh: bool = False
+    existingSample: ReviewSample | None = None
 
 
 def _label(value: object) -> str | None:
@@ -206,7 +275,11 @@ class ReviewOperationManager:
         self._prune()
         if request.country not in STOREFRONTS:
             raise SearchError(422, "VALIDATION_ERROR", "Unsupported App Store storefront.")
-        payload = (app_id, request.country, request.targetCount)
+        sample = request.existingSample
+        if sample and (sample.appId != app_id or sample.country != request.country):
+            raise SearchError(422, "VALIDATION_ERROR", "Saved review sample does not match the requested app and storefront.")
+        payload = (app_id, request.country, request.targetCount, request.refresh,
+                   sample.fingerprint if sample else None)
         prior = self.requests.get(request.requestId)
         if prior:
             if prior[0] != payload:
@@ -221,18 +294,24 @@ class ReviewOperationManager:
                 raise SearchError(409, "OPERATION_CONFLICT", "A different target is already active for this app and storefront.")
             self.requests[request.requestId] = (payload, previous_id)
             return self.get(previous_id)
-        if previous and previous["targetCount"] >= request.targetCount and previous["status"] != "failed":
+        if previous and previous["targetCount"] >= request.targetCount and previous["status"] != "failed" and not request.refresh:
             self.requests[request.requestId] = (payload, previous_id)
             return self.get(previous_id)
         if sum(value["status"] in self.ACTIVE for value in self.operations.values()) >= 2:
             raise SearchError(429, "SEARCH_RATE_LIMITED", "Two review collections are already active. Retry manually later.")
 
         operation_id = secrets.token_urlsafe(24)
-        completed = set(previous["completedPages"]) if previous and request.targetCount >= previous["targetCount"] else set()
-        records = dict(previous["records"]) if completed else {}
-        page_gaps = set(previous["pageGaps"]) if completed else set()
-        warnings = dict(previous["warnings"]) if completed else {}
-        attempts = previous["attempts"] if completed else 0
+        reuse_previous = bool(previous and not request.refresh and request.targetCount >= previous["targetCount"])
+        reuse_sample = bool(sample and not request.refresh)
+        completed = (set(sample.pageObservations.completedPages) if reuse_sample and sample else
+                     set(previous["completedPages"]) if reuse_previous else set())
+        records = ({review.reviewId: review.model_dump() for review in sample.reviews} if reuse_sample and sample else
+                   dict(previous["records"]) if reuse_previous else {})
+        page_gaps = (set(sample.pageObservations.pageGaps) if reuse_sample and sample else
+                     set(previous["pageGaps"]) if reuse_previous else set())
+        warnings = dict(previous["warnings"]) if reuse_previous and previous else {}
+        attempts = (sample.pageObservations.pagesAttempted if reuse_sample and sample else
+                    previous["attempts"] if reuse_previous and previous else 0)
         operation = {
             "operationId": operation_id, "kind": "review-fetch", "status": "queued",
             "scope": {"appId": app_id, "country": request.country}, "targetCount": request.targetCount,

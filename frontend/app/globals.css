@@ -126,6 +126,12 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 20px;
 .review-list p { overflow-wrap: anywhere; white-space: pre-wrap; }
 .review-heading { display: flex; justify-content: space-between; gap: 16px; }
 .review-warning { color: var(--error); font-size: 13px; }
+.review-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 20px; font-weight: 600; }
+.review-filter select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 4px; background: white; color: var(--ink); }
+.research-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.saved-research { margin-bottom: 24px; }
+.saved-research h2 { font-size: 18px; }
+.saved-research-list { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; }
 .listing-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
 .app-details section > section { margin: 32px 0; }
 .screenshots { list-style: none; padding: 4px 4px 12px; margin: 12px -4px 0; display: flex; gap: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; position: relative; }

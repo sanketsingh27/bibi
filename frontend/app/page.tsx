@@ -5,6 +5,7 @@ import { errorMessages, normalizedQuery, type Catalog, type SearchIdentity, type
 import { Settings } from "./settings";
 import { ListingRow } from "./listing-row";
 import { AppDetails, type DetailIdentity } from "./app-details";
+import { listSavedResearch, type SavedSample } from "./research-library";
 
 type Screen =
   | { kind: "initial" }
@@ -23,6 +24,7 @@ export default function Discovery() {
   const pending = useRef<AbortController | null>(null);
   const [detail, setDetail] = useState<DetailIdentity | null>(null);
   const [locationReady, setLocationReady] = useState(false);
+  const [savedResearch, setSavedResearch] = useState<SavedSample[]>([]);
   const openedFromSearch = useRef(false);
   const selectionButton = useRef<HTMLButtonElement | null>(null);
 
@@ -32,6 +34,7 @@ export default function Discovery() {
       setDetail(params.has("appId") || params.has("country") ? {
         appId: params.get("appId") ?? "", country: params.get("country") ?? "",
         invalid: params.getAll("appId").length !== 1 || params.getAll("country").length !== 1,
+        saved: params.get("saved") === "1",
       } : null);
       setLocationReady(true);
     }
@@ -41,15 +44,23 @@ export default function Discovery() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    const load = () => void listSavedResearch().then((items) => { if (active) setSavedResearch(items); }).catch(() => { if (active) setSavedResearch([]); });
+    load();
+    window.addEventListener("bibi:saved-research-changed", load);
+    return () => { active = false; window.removeEventListener("bibi:saved-research-changed", load); };
+  }, [detail]);
+
+  useEffect(() => {
     if (locationReady && !detail) selectionButton.current?.focus();
   }, [detail, locationReady]);
 
-  function openDetails(appId: number, storefront: string, button: HTMLButtonElement) {
+  function openDetails(appId: number, storefront: string, button: HTMLButtonElement, saved = false) {
     selectionButton.current = button;
     openedFromSearch.current = true;
-    const params = new URLSearchParams({ appId: String(appId), country: storefront });
+    const params = new URLSearchParams({ appId: String(appId), country: storefront, ...(saved ? { saved: "1" } : {}) });
     window.history.pushState(null, "", `?${params}`);
-    setDetail({ appId: String(appId), country: storefront, invalid: false });
+    setDetail({ appId: String(appId), country: storefront, invalid: false, saved });
   }
 
   function backToSearch() {
@@ -138,6 +149,14 @@ export default function Discovery() {
           <p className="lede">Explore listing matches for a market, problem, or known app. Select the intended listing to inspect its details.</p>
         </div>
         <section className="search-panel" aria-label="App discovery search">
+          {savedResearch.length > 0 && <section aria-labelledby="saved-research-title" className="saved-research">
+            <h2 id="saved-research-title">Saved research</h2>
+            <ul className="saved-research-list">{savedResearch.map((sample) => <li key={`${sample.appId}:${sample.country}`}>
+              <button type="button" className="secondary" onClick={(event) => openDetails(sample.appId, sample.country, event.currentTarget, true)}>
+                {sample.listing.name ?? `App ${sample.appId}`} · {sample.country.toUpperCase()} · {sample.reviews.length} saved reviews
+              </button>
+            </li>)}</ul>
+          </section>}
           <div className="search-context"><span className="eyebrow">{mode === "keyword" ? "Keyword" : "App name"}</span><span>Storefront: <strong>{country ? `${country.name} (${country.code.toUpperCase()})` : catalogFailed ? "Unavailable" : "Loading catalog…"}</strong></span></div>
           <div className="storefront-control">
             <label htmlFor="country">Country storefront</label>

@@ -6,7 +6,7 @@ import { ListingRow } from "./listing-row";
 import { DetailContent } from "./detail-content";
 import { detailSnapshot, validatedDetails } from "./detail-snapshot";
 
-export type DetailIdentity = { appId: string; country: string; invalid: boolean };
+export type DetailIdentity = { appId: string; country: string; invalid: boolean; saved?: boolean };
 type DetailScreen =
   | { kind: "loading" }
   | { kind: "success"; data: AppDetailsResponse; saved: boolean; lookupError?: string }
@@ -38,6 +38,17 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
     }
     setScreen({ kind: "loading" });
     setStorageMessage("");
+    if (identity.saved) {
+      detailSnapshot(Number(identity.appId), identity.country)
+        .then((value) => {
+          const saved = validatedDetails(value, Number(identity.appId), identity.country);
+          if (controller.signal.aborted) return;
+          if (saved) setScreen({ kind: "success", data: saved, saved: true });
+          else setScreen({ kind: "error", code: "APP_UNAVAILABLE", retryAfter: null });
+        })
+        .catch(() => { if (!controller.signal.aborted) setStorageMessage("Local research storage is unavailable."); });
+      return () => controller.abort();
+    }
     async function failure(code: string, retryAfter: string | null) {
       if (controller.signal.aborted) return;
       if (code !== "VALIDATION_ERROR") {
@@ -76,7 +87,7 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
       })
       .catch(() => { void failure("CONNECTION_ERROR", null); });
     return () => controller.abort();
-  }, [identity.appId, identity.country, identity.invalid, attempt]);
+  }, [identity.appId, identity.country, identity.invalid, identity.saved, attempt]);
 
   const error = screen.kind === "error" ? detailErrors[screen.code] ?? errorMessages.CONNECTION_ERROR : null;
 
@@ -85,7 +96,7 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
     <p className="eyebrow detail-scope">Apple App Store · Storefront: {identity.country.toUpperCase() || "Unavailable"}{screen.kind !== "success" && ` · App ID ${identity.appId || "Unavailable"}`}</p>
     <section aria-label="Exact app listing" aria-busy={screen.kind === "loading"}>
       <div role="status" aria-live="polite" className={screen.kind === "success" ? "visually-hidden" : "status-line"}>
-        {screen.kind === "loading" ? "Loading the exact app listing…" : screen.kind === "success" ? (screen.saved ? "Saved listing snapshot. Live lookup failed." : "Exact listing loaded.") : "Listing lookup not completed."}
+        {screen.kind === "loading" ? "Loading the exact app listing…" : screen.kind === "success" ? (identity.saved ? "Saved listing opened. No live lookup." : screen.saved ? "Saved listing snapshot. Live lookup failed." : "Exact listing loaded.") : "Listing lookup not completed."}
       </div>
       {screen.kind === "loading" && <h1>Loading app details…</h1>}
       {screen.kind === "error" && error && <div className="error-state" role="alert">
@@ -94,10 +105,10 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
         {screen.code !== "VALIDATION_ERROR" && <button type="button" className="secondary" onClick={() => setAttempt((value) => value + 1)}>Retry exact lookup</button>}
       </div>}
       {screen.kind === "success" && <>
-        {screen.saved && <div className="saved-notice" role="status"><strong>Saved snapshot · Live lookup failed</strong><p>{(detailErrors[screen.lookupError ?? ""] ?? errorMessages.CONNECTION_ERROR).message} Showing previously saved metadata for this exact app and storefront.</p><button type="button" className="secondary" onClick={() => setAttempt((value) => value + 1)}>Retry exact lookup</button></div>}
+        {screen.saved && !identity.saved && <div className="saved-notice" role="status"><strong>Saved snapshot · Live lookup failed</strong><p>{(detailErrors[screen.lookupError ?? ""] ?? errorMessages.CONNECTION_ERROR).message} Showing previously saved metadata for this exact app and storefront.</p><button type="button" className="secondary" onClick={() => setAttempt((value) => value + 1)}>Retry exact lookup</button></div>}
         <ul className="results"><ListingRow key={`${screen.data.appId}:${screen.data.country}:${screen.data.fetchedAt}`} app={screen.data} heading="h1" price={screen.data.formattedPrice} /></ul>
         <p className="result-note">Listing ratings belong to the {screen.data.country.toUpperCase()} storefront. Ratings are not written reviews.</p>
-        <DetailContent key={`${screen.data.appId}:${screen.data.country}`} app={screen.data} />
+        <DetailContent key={`${screen.data.appId}:${screen.data.country}`} app={screen.data} savedScope={identity.saved === true} />
         <p className="fetch-info">Metadata fetched <time dateTime={screen.data.fetchedAt}>{new Date(screen.data.fetchedAt).toLocaleString()}</time> · {screen.saved ? "Saved on this device · Not live metadata" : screen.data.cached ? "Cached metadata" : "Fresh from Apple · Not cached"}</p>
       </>}
     </section>

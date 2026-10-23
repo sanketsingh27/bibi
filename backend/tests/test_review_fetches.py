@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from bibi.main import create_app
+from bibi.reviews import ReviewRecord, review_fingerprint
 
 
 @asynccontextmanager
@@ -40,6 +41,17 @@ def feed(entries=None):
     if entries is not None:
         value["feed"]["entry"] = entries
     return httpx.Response(200, json=value)
+
+
+def saved_sample(app_id=42, country="us", *, text="Previously saved text", fetched_at="2026-10-20T10:00:00Z"):
+    record = ReviewRecord(reviewId="saved-review", appId=app_id, country=country, title="Saved title",
+                          text=text, stars=3, updatedAt="2026-10-20T10:00:00Z", version="1.0",
+                          fetchedAt=fetched_at)
+    return {
+        "appId": app_id, "country": country, "reviews": [record.model_dump()],
+        "fingerprint": review_fingerprint(app_id, country, [record]),
+        "pageObservations": {"completedPages": [1], "pageGaps": [], "pagesAttempted": 1},
+    }
 
 
 async def collect(client, *, app_id=42, country="us", request_id="sample-1", target=200):
@@ -165,6 +177,85 @@ async def test_invalid_scope_or_body_never_dispatches(app_id, body):
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
     assert calls == []
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda sample: sample.update(fingerprint="0" * 64),
+    lambda sample: sample["pageObservations"].update(completedPages=[11]),
+    lambda sample: sample["pageObservations"].update(pageGaps=[2]),
+    lambda sample: sample["reviews"][0].update(stars=6),
+    lambda sample: sample["reviews"][0].update(country="ca"),
+])
+async def test_browser_supplied_sample_fingerprint_and_pages_are_validated_before_dispatch(mutate):
+    calls = []
+    sample = saved_sample()
+    mutate(sample)
+    async with api(lambda request: calls.append(request) or feed([])) as client:
+        response = await client.post("/api/v1/apps/42/review-fetches", json={
+            "requestId": "untrusted-sample", "country": "us", "targetCount": 200,
+            "existingSample": sample,
+        })
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert calls == []
+
+
+async def test_sample_fingerprint_ignores_fetch_time_but_tracks_review_content():
+    first = saved_sample(fetched_at="2026-10-20T10:00:00Z")
+    refetched = saved_sample(fetched_at="2026-10-21T10:00:00Z")
+    edited = saved_sample(text="Substantive edit")
+    assert first["fingerprint"] == refetched["fingerprint"]
+    assert first["fingerprint"] != edited["fingerprint"]
+
+
+async def test_refresh_replaces_changed_review_text_without_inflating_unique_count():
+    calls = []
+
+    def apple(request):
+        page = int(request.url.path.split("page=")[1].split("/")[0])
+        calls.append(page)
+        return feed([review("saved-review", content={"label": "Updated source text"})] if page == 1 else [])
+
+    async with api(apple) as client:
+        started = await client.post("/api/v1/apps/42/review-fetches", json={
+            "requestId": "refresh-existing", "country": "us", "targetCount": 200,
+            "refresh": True, "existingSample": saved_sample(),
+        })
+        operation_id = started.json()["operationId"]
+        for _ in range(100):
+            await asyncio.sleep(0)
+            operation = (await client.get(f"/api/v1/operations/{operation_id}")).json()
+            if operation["status"] not in {"queued", "running"}:
+                break
+
+    assert operation["status"] == "succeeded"
+    assert operation["result"]["count"] == 1
+    assert operation["result"]["reviews"][0]["text"] == "Updated source text"
+    assert calls == list(range(1, 11))
+
+
+async def test_failed_refresh_returns_no_replacement_and_preserves_prior_browser_sample():
+    original = saved_sample()
+    snapshot = repr(original)
+    async with api(lambda request: httpx.Response(503)) as client:
+        operation = await collect_refresh(client, original)
+    assert operation["status"] == "failed"
+    assert operation["result"]["reviews"] == []
+    assert repr(original) == snapshot
+
+
+async def collect_refresh(client, sample):
+    started = await client.post("/api/v1/apps/42/review-fetches", json={
+        "requestId": "failed-refresh", "country": "us", "targetCount": 200,
+        "refresh": True, "existingSample": sample,
+    })
+    operation_id = started.json()["operationId"]
+    for _ in range(100):
+        await asyncio.sleep(0)
+        operation = (await client.get(f"/api/v1/operations/{operation_id}")).json()
+        if operation["status"] not in {"queued", "running"}:
+            return operation
+    raise AssertionError("refresh operation did not finish")
 
 
 async def test_cross_origin_review_collection_is_rejected_before_dispatch():
