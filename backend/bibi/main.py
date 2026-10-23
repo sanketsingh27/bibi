@@ -105,10 +105,10 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
             try:
                 yield
             finally:
-                for task in list(app.state.review_operations.tasks):
+                for task in list(app.state.review_operations.tasks.values()):
                     task.cancel()
                 if app.state.review_operations.tasks:
-                    await asyncio.gather(*app.state.review_operations.tasks, return_exceptions=True)
+                    await asyncio.gather(*app.state.review_operations.tasks.values(), return_exceptions=True)
                 await app.state.search.aclose()
 
     app = FastAPI(title="Bibi App discovery", lifespan=lifespan)
@@ -122,7 +122,7 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
         ) or (
             request.method == "POST" and request.url.path.endswith("/review-fetches")
         ) or (
-            request.method == "GET" and request.url.path.startswith("/api/v1/operations/")
+            request.url.path.startswith("/api/v1/operations/")
         )
         if protected and not local_request_allowed(request):
             response = JSONResponse(status_code=403, content={"error": {
@@ -218,6 +218,14 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
     @app.get("/api/v1/operations/{operation_id}")
     async def get_operation(operation_id: str, request: Request):
         return request.app.state.review_operations.get(operation_id)
+
+    @app.post("/api/v1/operations/{operation_id}/cancel")
+    async def cancel_operation(operation_id: str, request: Request):
+        return request.app.state.review_operations.cancel(operation_id)
+
+    @app.post("/api/v1/operations/{operation_id}/resume")
+    async def resume_operation(operation_id: str, request: Request):
+        return request.app.state.review_operations.resume(operation_id)
 
     return app
 
