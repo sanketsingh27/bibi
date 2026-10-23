@@ -1,6 +1,7 @@
+import asyncio
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Protocol
 from urllib.parse import urlsplit
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .credentials import CredentialStoreUnavailable, MacOSCredentialStore
 from .models import MAX_SAFE_INTEGER, AppDetailsResponse, ErrorResponse, SearchResponse, StorefrontResponse
+from .reviews import ReviewFetchInput, ReviewFetcher, ReviewOperationManager
 from .search import SearchError, SearchService
 from .storefronts import STOREFRONTS
 
@@ -90,17 +92,23 @@ def local_request_allowed(request: Request) -> bool:
 
 def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
                clock: Callable[[], float] = time.monotonic,
-               credential_store: CredentialStore | None = None) -> FastAPI:
+               credential_store: CredentialStore | None = None,
+               sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep) -> FastAPI:
     store = credential_store or MacOSCredentialStore()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # HTTPX verifies TLS by default, follows no redirects, and makes no automatic retries.
         async with httpx.AsyncClient(transport=apple_transport, timeout=8, follow_redirects=False) as client:
-            app.state.search = SearchService(client, clock)
+            app.state.search = SearchService(client, clock, sleeper)
+            app.state.review_operations = ReviewOperationManager(ReviewFetcher(client, app.state.search), clock)
             try:
                 yield
             finally:
+                for task in list(app.state.review_operations.tasks):
+                    task.cancel()
+                if app.state.review_operations.tasks:
+                    await asyncio.gather(*app.state.review_operations.tasks, return_exceptions=True)
                 await app.state.search.aclose()
 
     app = FastAPI(title="Bibi App discovery", lifespan=lifespan)
@@ -111,6 +119,10 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
             request.method == "PUT" and request.url.path == "/api/v1/ai/settings"
         ) or (
             request.method == "DELETE" and request.url.path == "/api/v1/ai/key"
+        ) or (
+            request.method == "POST" and request.url.path.endswith("/review-fetches")
+        ) or (
+            request.method == "GET" and request.url.path.startswith("/api/v1/operations/")
         )
         if protected and not local_request_allowed(request):
             response = JSONResponse(status_code=403, content={"error": {
@@ -196,6 +208,16 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
                 or len(request.query_params.getlist("country")) != 1):
             raise RequestValidationError([])
         return await request.app.state.search.lookup(int(app_id), country)
+
+    @app.post("/api/v1/apps/{app_id}/review-fetches", status_code=202)
+    async def start_review_fetch(app_id: str, review_request: ReviewFetchInput, request: Request):
+        if re.fullmatch(r"[0-9]{1,16}", app_id) is None or not 0 < int(app_id) <= MAX_SAFE_INTEGER:
+            raise RequestValidationError([])
+        return request.app.state.review_operations.start(int(app_id), review_request)
+
+    @app.get("/api/v1/operations/{operation_id}")
+    async def get_operation(operation_id: str, request: Request):
+        return request.app.state.review_operations.get(operation_id)
 
     return app
 

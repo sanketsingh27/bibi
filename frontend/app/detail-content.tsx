@@ -70,7 +70,7 @@ function Description({ text }: { text: string | null }) {
 
 export function DetailContent({ app }: { app: AppDetailsResponse }) {
   const tabs = ["Analysis", "Reviews", "Competitors"];
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(1);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   return <>
     <ScreenshotCarousel app={app} />
@@ -89,7 +89,7 @@ export function DetailContent({ app }: { app: AppDetailsResponse }) {
     {tabs.map((tab, index) => <section key={tab} role="tabpanel" id={`panel-${index}`} aria-labelledby={`tab-${index}`} tabIndex={0} hidden={active !== index} className="research-panel">
       <h2>{tab}</h2>
       {index === 0 && <p>Analysis is not available yet. No written reviews have been collected or analyzed for this app.</p>}
-      {index === 1 && <p>Written reviews are not available yet. The listing rating count above is not a written-review count.</p>}
+      {index === 1 && <ReviewPanel app={app} />}
       {index === 2 && <p>Competitor suggestions and comparison are not available yet. No apps have been classified as competitors.</p>}
     </section>)}
     <section className="additional-details" aria-labelledby="details-title"><h2 id="details-title">Listing details</h2>
@@ -101,4 +101,81 @@ export function DetailContent({ app }: { app: AppDetailsResponse }) {
     </section>
     <section aria-labelledby="release-title"><h2 id="release-title">Release notes</h2><p className="listing-text">{app.releaseNotes ?? "Release notes unavailable."}</p></section>
   </>;
+}
+
+type ReviewOperation = {
+  operationId: string;
+  status: "queued" | "running" | "succeeded" | "partial" | "failed";
+  progress: { count: number; targetCount: number; pagesAttempted: number; currentPage: number | null; pageGaps: number[] };
+  result: null | {
+    count: number; targetCount: number; targetReached: boolean; pagesAttempted: number;
+    pageGaps: number[]; warnings: string[]; sourceAvailability: "available" | "empty" | "partial" | "unavailable";
+    reviews: { reviewId: string; title: string | null; text: string; stars: number; updatedAt: string; version: string | null }[];
+  };
+  error: { code: string; message: string } | null;
+};
+
+function ReviewPanel({ app }: { app: AppDetailsResponse }) {
+  const [operation, setOperation] = useState<ReviewOperation | null>(null);
+  const [connectionError, setConnectionError] = useState(false);
+  const requestId = useRef<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    requestId.current ??= crypto.randomUUID();
+    async function collect() {
+      try {
+        const response = await fetch(`/api/v1/apps/${app.appId}/review-fetches`, {
+          method: "POST", cache: "no-store", signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestId: requestId.current, country: app.country, targetCount: 200 }),
+        });
+        if (!response.ok) throw new Error("Review collection could not start");
+        let current = await response.json() as ReviewOperation;
+        setOperation(current);
+        while (["queued", "running"].includes(current.status)) {
+          await new Promise<void>((resolve, reject) => {
+            const finish = () => { controller.signal.removeEventListener("abort", abort); resolve(); };
+            const abort = () => { window.clearTimeout(timer); controller.signal.removeEventListener("abort", abort); reject(new DOMException("Aborted", "AbortError")); };
+            const timer = window.setTimeout(finish, 500);
+            controller.signal.addEventListener("abort", abort, { once: true });
+          });
+          const poll = await fetch(`/api/v1/operations/${encodeURIComponent(current.operationId)}`, { cache: "no-store", signal: controller.signal });
+          if (!poll.ok) throw new Error("Review operation is no longer available");
+          current = await poll.json() as ReviewOperation;
+          setOperation(current);
+        }
+      } catch {
+        if (!controller.signal.aborted) setConnectionError(true);
+      }
+    }
+    void collect();
+    return () => controller.abort();
+  }, [app.appId, app.country]);
+
+  const result = operation?.result;
+  const progress = operation?.progress;
+  return <div className="review-sample" aria-busy={operation?.status === "queued" || operation?.status === "running"}>
+    <p className="result-note">Initial target: 200 written reviews · This exact app · {app.country.toUpperCase()} storefront</p>
+    <div className="review-progress" role="status" aria-live="polite">
+      {connectionError && "Review collection status could not be loaded. The listing is still available."}
+      {!connectionError && !operation && "Starting Apple's public review collection…"}
+      {operation?.status === "queued" && "Review collection queued…"}
+      {operation?.status === "running" && `Collecting page ${progress?.currentPage ?? (progress?.pagesAttempted ?? 0) + 1} of 10 · ${progress?.count ?? 0} of 200 written reviews`}
+      {operation?.status === "succeeded" && result && `${result.count} written reviews collected · ${result.pagesAttempted} pages checked${result.targetReached ? " · target reached" : " · target not reached"}`}
+      {operation?.status === "partial" && result && `${result.count} written reviews collected before collection stopped · partial sample`}
+      {operation?.status === "failed" && (operation.error?.message ?? "Apple's review source could not be reached.")}
+    </div>
+    {progress && <p className="help">Pages checked: {progress.pagesAttempted} of 10{progress.pageGaps.length ? ` · Empty or duplicate-only pages: ${progress.pageGaps.join(", ")}` : ""}</p>}
+    {result && <>
+      <p className="result-note">Source availability: {result.sourceAvailability}. Page gaps: {result.pageGaps.length ? result.pageGaps.join(", ") : "none observed"}. This sample does not represent every App Store review.</p>
+      {result.warnings.map((warning) => <p className="review-warning" key={warning}>{warning}</p>)}
+      {result.reviews.length === 0 ? <p>{result.sourceAvailability === "empty" ? "Apple returned no written reviews in the pages checked. This does not mean the app has no App Store reviews." : "No written reviews were available from this source."}</p> : <ol className="review-list">
+        {result.reviews.map((review) => <li key={review.reviewId}>
+          <div className="review-heading"><strong>{review.title ?? `${review.stars} stars`}</strong><span>{review.stars} / 5 stars</span></div>
+          <p>{review.text}</p>
+          <p className="help">Updated <time dateTime={review.updatedAt}>{new Date(review.updatedAt).toLocaleDateString()}</time>{review.version ? ` · Version ${review.version}` : ""}</p>
+        </li>)}
+      </ol>}
+    </>}
+  </div>;
 }

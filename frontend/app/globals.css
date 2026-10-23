@@ -120,6 +120,12 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 20px;
 
 .detail-facts { padding: 24px 0; border-top: 1px solid var(--line); }
 .detail-facts > div { min-width: 0; overflow-wrap: anywhere; }
+.review-progress { margin: 16px 0 8px; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--surface); color: var(--ink); font-size: 14px; }
+.review-list { list-style: none; margin: 24px 0 0; padding: 0; }
+.review-list li { padding: 20px 0; border-top: 1px solid var(--line); }
+.review-list p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.review-heading { display: flex; justify-content: space-between; gap: 16px; }
+.review-warning { color: var(--error); font-size: 13px; }
 .listing-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
 .app-details section > section { margin: 32px 0; }
 .screenshots { list-style: none; padding: 4px 4px 12px; margin: 12px -4px 0; display: flex; gap: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; position: relative; }
@@ -172,6 +178,7 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 20px;
 @media (max-width: 600px) {
   .app-details { padding-top: 16px; }
   .app-details .results > li { grid-template-columns: 1fr; gap: 16px; }
+  .review-heading { flex-direction: column; gap: 4px; }
   .app-details .listing-artwork { grid-column: 1; grid-row: 1; width: auto; flex-direction: row; justify-content: space-between; padding: 0; }
   .app-details .listing-identity { grid-column: 1; grid-row: 2; }
   .app-details .app-icon { width: 64px; height: 64px; border-radius: 12px; }
