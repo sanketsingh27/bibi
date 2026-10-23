@@ -17,6 +17,11 @@ class Listing(BaseModel):
     country: str
 
 
+class AppDetailsResponse(Listing):
+    fetchedAt: str
+    cached: bool
+
+
 class SearchResponse(BaseModel):
     query: str
     country: str

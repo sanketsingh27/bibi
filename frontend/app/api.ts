@@ -18,6 +18,7 @@ export type SearchResponse = {
   cached: boolean;
   results: Listing[];
 };
+export type AppDetailsResponse = Listing & { fetchedAt: string; cached: boolean };
 export type SearchIdentity = { phrase: string; country: Storefront };
 
 export const errorMessages: Record<string, { title: string; message: string }> = {

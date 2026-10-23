@@ -7,11 +7,13 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
-from .models import SearchResponse, normalize_results
+from .models import AppDetailsResponse, SearchResponse, normalize_results
 
 
 SEARCH_PARAMETERS = (("media", "software"), ("entity", "software"), ("lang", "en_us"))
 type SearchKey = tuple[str, str, int, tuple[tuple[str, str], ...]]
+type LookupKey = tuple[int, str]
+type MetadataResponse = SearchResponse | AppDetailsResponse
 
 
 class SearchError(Exception):
@@ -41,11 +43,17 @@ class SearchService:
         self.client = client
         self.clock = clock
         self.dispatched: deque[float] = deque()
-        self.cache: dict[SearchKey, tuple[float, SearchResponse]] = {}
-        self.pending: dict[SearchKey, asyncio.Task[SearchResponse]] = {}
+        self.cache: dict[SearchKey | LookupKey, tuple[float, MetadataResponse]] = {}
+        self.pending: dict[SearchKey | LookupKey, asyncio.Task[MetadataResponse]] = {}
 
     async def search(self, query: str, country: str, limit: int) -> SearchResponse:
         key = (query, country, limit, SEARCH_PARAMETERS)
+        return await self._load(key)
+
+    async def lookup(self, app_id: int, country: str) -> AppDetailsResponse:
+        return await self._load((app_id, country))
+
+    async def _load(self, key: SearchKey | LookupKey) -> MetadataResponse:
         now = self.clock()
         entry = self.cache.get(key)
         if entry is not None:
@@ -77,21 +85,23 @@ class SearchService:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _fetch(self, key: SearchKey) -> SearchResponse:
+    async def _fetch(self, key: SearchKey | LookupKey) -> MetadataResponse:
         try:
-            response = await self._request(*key[:3])
+            response = await self._request(*key) if len(key) == 2 else await self._request(*key[:3])
             self.cache[key] = (self.clock() + 86400, response)
             return response
         finally:
             del self.pending[key]
 
-    async def _request(self, query: str, country: str, limit: int) -> SearchResponse:
+    async def _request(self, query: str | int, country: str, limit: int | None = None) -> MetadataResponse:
         try:
             async with asyncio.timeout(8):
-                response = await self.client.get("https://itunes.apple.com/search", params={
+                params = {"id": query, "country": country, "entity": "software", "lang": "en_us"} if limit is None else {
                     "term": query, "country": country, "limit": limit,
                     **dict(SEARCH_PARAMETERS),
-                })
+                }
+                response = await self.client.get(
+                    "https://itunes.apple.com/lookup" if limit is None else "https://itunes.apple.com/search", params=params)
                 if response.status_code == 429:
                     raise SearchError(429, "UPSTREAM_RATE_LIMITED", "Apple is limiting searches. Retry manually later.",
                                       valid_retry_after(response.headers.get("retry-after")))
@@ -103,11 +113,17 @@ class SearchService:
                         or envelope["resultCount"] != len(envelope["results"])
                         or any(not isinstance(record, dict) for record in envelope["results"])):
                     raise ValueError("Malformed Apple envelope")
-                results = normalize_results(envelope["results"], country, limit)
+                records = envelope["results"]
+                if limit is None:
+                    records = [record for record in records if type(record.get("trackId")) is int and record["trackId"] == query]
+                results = normalize_results(records, country, limit or 1)
         except (TimeoutError, httpx.TimeoutException) as error:
             raise SearchError(504, "UPSTREAM_TIMEOUT", "Apple search timed out. Retry manually.") from error
         except (httpx.HTTPError, ValueError, UnicodeError) as error:
             raise SearchError(502, "UPSTREAM_ERROR", "Apple search is unavailable. Retry manually.") from error
-        return SearchResponse(query=query, country=country,
-                              fetchedAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                              cached=False, results=results)
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if limit is None:
+            if not results:
+                raise SearchError(404, "APP_UNAVAILABLE", "This exact app is unavailable in the requested storefront.")
+            return AppDetailsResponse(**results[0].model_dump(), fetchedAt=fetched_at, cached=False)
+        return SearchResponse(query=query, country=country, fetchedAt=fetched_at, cached=False, results=results)

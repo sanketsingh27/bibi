@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { errorMessages, normalizedQuery, type Catalog, type SearchIdentity, type SearchResponse, type Storefront } from "./api";
 import { Settings } from "./settings";
 import { ListingRow } from "./listing-row";
+import { AppDetails, type DetailIdentity } from "./app-details";
 
 type Screen =
   | { kind: "initial" }
@@ -14,14 +15,51 @@ type Screen =
 export default function Discovery() {
   const [draft, setDraft] = useState("");
   const [mode, setMode] = useState<"keyword" | "app-name">("keyword");
-  const [confirmedId, setConfirmedId] = useState<number | null>(null);
-  const resultHeading = useRef<HTMLHeadingElement | null>(null);
   const [country, setCountry] = useState<Storefront | null>(null);
   const [storefronts, setStorefronts] = useState<Storefront[]>([]);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [screen, setScreen] = useState<Screen>({ kind: "initial" });
   const sequence = useRef(0);
   const pending = useRef<AbortController | null>(null);
+  const [detail, setDetail] = useState<DetailIdentity | null>(null);
+  const [locationReady, setLocationReady] = useState(false);
+  const openedFromSearch = useRef(false);
+  const selectionButton = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    function readLocation() {
+      const params = new URLSearchParams(window.location.search);
+      setDetail(params.has("appId") || params.has("country") ? {
+        appId: params.get("appId") ?? "", country: params.get("country") ?? "",
+        invalid: params.getAll("appId").length !== 1 || params.getAll("country").length !== 1,
+      } : null);
+      setLocationReady(true);
+    }
+    readLocation();
+    window.addEventListener("popstate", readLocation);
+    return () => window.removeEventListener("popstate", readLocation);
+  }, []);
+
+  useEffect(() => {
+    if (locationReady && !detail) selectionButton.current?.focus();
+  }, [detail, locationReady]);
+
+  function openDetails(appId: number, storefront: string, button: HTMLButtonElement) {
+    selectionButton.current = button;
+    openedFromSearch.current = true;
+    const params = new URLSearchParams({ appId: String(appId), country: storefront });
+    window.history.pushState(null, "", `?${params}`);
+    setDetail({ appId: String(appId), country: storefront, invalid: false });
+  }
+
+  function backToSearch() {
+    if (openedFromSearch.current) {
+      window.history.back();
+    } else {
+      window.history.replaceState(null, "", "/");
+      setDetail(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -39,7 +77,6 @@ export default function Discovery() {
   }, []);
 
   async function search(submitted: SearchIdentity) {
-    setConfirmedId(null);
     const current = ++sequence.current;
     pending.current?.abort();
     const controller = new AbortController();
@@ -77,38 +114,28 @@ export default function Discovery() {
     const next = storefronts.find((item) => item.code === code);
     if (!next || next.code === country?.code) return;
     setCountry(next);
-    setConfirmedId(null);
     if (screen.kind !== "initial") void search({ phrase: screen.submitted.phrase, country: next });
   }
 
   const error = screen.kind === "error" ? errorMessages[screen.code] : null;
-  const confirmed = screen.kind === "success" && mode === "app-name"
-    ? screen.data.results.find((app) => app.appId === confirmedId)
-    : undefined;
-  const displayed = screen.kind === "success" ? (confirmed ? [confirmed] : screen.data.results) : [];
 
   function changeMode(next: typeof mode) {
     setMode(next);
-    setConfirmedId(null);
-  }
-
-  function confirm(appId: number | null) {
-    setConfirmedId(appId);
-    resultHeading.current?.focus();
   }
 
   return (
     <>
-      <a className="skip-link" href="#search">Skip to search</a>
+      <a className="skip-link" href={detail ? "#app-details" : "#search"}>{detail ? "Skip to app details" : "Skip to search"}</a>
       <header className="masthead">
         <span className="wordmark">bibi<span aria-hidden="true">.</span></span>
-        <span className="local-label">Local workspace <span aria-hidden="true">/</span> App discovery</span>
+        <span className="local-label">Local workspace <span aria-hidden="true">/</span> {detail ? "App details" : "App discovery"}</span>
       </header>
-      <main>
+      {detail && <AppDetails key={`${detail.appId}:${detail.country}:${detail.invalid}`} identity={detail} onBack={backToSearch} />}
+      <main hidden={Boolean(detail) || !locationReady}>
         <div className="intro">
           <p className="eyebrow">Apple App Store · App discovery</p>
           <h1>Find apps.<br /><span>Search a keyword or app name.</span></h1>
-          <p className="lede">Explore listing matches for a market, problem, or known app. Discovery only—no saved research or review collection.</p>
+          <p className="lede">Explore listing matches for a market, problem, or known app. Select the intended listing to inspect its details.</p>
         </div>
         <section className="search-panel" aria-label="App discovery search">
           <div className="search-context"><span className="eyebrow">{mode === "keyword" ? "Keyword" : "App name"}</span><span>Storefront: <strong>{country ? `${country.name} (${country.code.toUpperCase()})` : catalogFailed ? "Unavailable" : "Loading catalog…"}</strong></span></div>
@@ -139,9 +166,7 @@ export default function Discovery() {
           <div role="status" aria-live="polite" aria-atomic="true" className="status-line">
             {screen.kind === "initial" && "Ready when you are. No search has been submitted."}
             {screen.kind === "loading" && `Searching “${screen.submitted.phrase}” in ${screen.submitted.country.name}…`}
-            {screen.kind === "success" && (confirmed
-              ? `Confirmed ${confirmed.name ?? `app ${confirmed.appId}`}. Showing only this app for “${screen.data.query}” in ${screen.submitted.country.name}.`
-              : `${screen.data.results.length} displayed ${mode === "app-name" ? "app candidates" : "search results"} for “${screen.data.query}” in ${screen.submitted.country.name}.`)}
+            {screen.kind === "success" && `${screen.data.results.length} displayed ${mode === "app-name" ? "app candidates" : "search results"} for “${screen.data.query}” in ${screen.submitted.country.name}.`}
           </div>
           {screen.kind === "initial" && <div className="empty-state"><span className="empty-marker" aria-hidden="true">01 / DISCOVER</span><h2>A phrase, then possibilities.</h2><p>Your matches will appear here in Apple’s returned order. Searches show up to 50 matches, not the entire App Store catalog.</p></div>}
           {screen.kind === "loading" && <div className="loading-lines" aria-hidden="true"><span /><span /><span /></div>}
@@ -153,22 +178,20 @@ export default function Discovery() {
             {screen.code !== "VALIDATION_ERROR" && <button type="button" className="secondary" onClick={() => void search(screen.submitted)}>Retry submitted search</button>}
           </div>}
           {screen.kind === "success" && <>
-            <div className="result-heading"><div><p className="eyebrow">{screen.submitted.country.name} · {screen.data.country.toUpperCase()}</p><h2 ref={resultHeading} tabIndex={-1}>{confirmed ? "Confirmed app" : `${mode === "app-name" ? "Candidates" : "Matches"} for “${screen.data.query}”`}</h2></div><span className="result-count">{displayed.length} displayed</span></div>
+            <div className="result-heading"><div><p className="eyebrow">{screen.submitted.country.name} · {screen.data.country.toUpperCase()}</p><h2>{`${mode === "app-name" ? "Candidates" : "Matches"} for “${screen.data.query}”`}</h2></div><span className="result-count">{screen.data.results.length} displayed</span></div>
             <p className="result-note">Limited search matches · Up to 50 · Apple’s returned order, not a complete catalog.</p>
             <p className="result-note">Average ratings and rating counts belong to the {screen.submitted.country.name} ({screen.data.country.toUpperCase()}) storefront, not global totals. Ratings are not written reviews.</p>
-            {mode === "app-name" && (confirmed
-              ? <button type="button" className="secondary" onClick={() => confirm(null)}>Return to candidates</button>
-              : screen.data.results.length > 0 && <p className="candidate-help">Compare names and developers, then confirm the intended app. No candidate is automatically verified, even when only one is returned.</p>)}
+            {mode === "app-name" && screen.data.results.length > 0 && <p className="candidate-help">Compare names and developers, then confirm the intended app. No candidate is automatically verified, even when only one is returned.</p>}
             <p className="fetch-info">Metadata fetched <time dateTime={screen.data.fetchedAt}>{new Date(screen.data.fetchedAt).toLocaleString()}</time> · {screen.data.cached ? "Cached metadata" : "Fresh from Apple · Not cached"}</p>
             {screen.data.results.length === 0 ? <div className="empty-state"><h3>No matches in this storefront.</h3><p>Apple returned no usable app matches. Try another phrase; no other country was substituted.</p></div> : <ol className="results">
-              {displayed.map((app) => <ListingRow key={app.appId} app={app}>
-                {mode === "app-name" && !confirmed && <button type="button" onClick={() => confirm(app.appId)} aria-label={`Confirm ${app.name ?? `app ${app.appId}`} by ${app.developer ?? "unavailable developer"} (Apple app ID ${app.appId})`}>Confirm app</button>}
+              {screen.data.results.map((app) => <ListingRow key={app.appId} app={app}>
+                <button type="button" onClick={(event) => openDetails(app.appId, screen.data.country, event.currentTarget)} aria-label={`Open ${app.name ?? `app ${app.appId}`} by ${app.developer ?? "unavailable developer"} (Apple app ID ${app.appId})`}>{mode === "app-name" ? "Confirm app" : "Open app"}</button>
               </ListingRow>)}
             </ol>}
           </>}
         </section>
         <Settings />
-        <footer>Listing discovery, nothing more. Searches are not saved; reload to start fresh.<br />Apple, the Apple logo, and App Store are trademarks of Apple Inc., registered in the U.S. and other countries.</footer>
+        <footer>Searches stay in this session. Bookmark a detail page to reopen that app and storefront.<br />Apple, the Apple logo, and App Store are trademarks of Apple Inc., registered in the U.S. and other countries.</footer>
       </main>
     </>
   );

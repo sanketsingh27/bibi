@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .credentials import CredentialStoreUnavailable, MacOSCredentialStore
-from .models import ErrorResponse, SearchResponse, StorefrontResponse
+from .models import MAX_SAFE_INTEGER, AppDetailsResponse, ErrorResponse, SearchResponse, StorefrontResponse
 from .search import SearchError, SearchService
 from .storefronts import STOREFRONTS
 
@@ -186,6 +186,16 @@ def create_app(*, apple_transport: httpx.AsyncBaseTransport | None = None,
         if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
             raise RequestValidationError([])
         return await request.app.state.search.search(params.q, params.country, params.limit)
+
+    @app.get("/api/v1/apps/{app_id}", response_model=AppDetailsResponse,
+             responses={status: {"model": ErrorResponse} for status in (404, 422, 429, 502, 504)})
+    async def app_details(app_id: str, request: Request, country: str):
+        if (re.fullmatch(r"[0-9]{1,16}", app_id) is None
+                or not 0 < int(app_id) <= MAX_SAFE_INTEGER or country not in STOREFRONTS
+                or set(request.query_params) != {"country"}
+                or len(request.query_params.getlist("country")) != 1):
+            raise RequestValidationError([])
+        return await request.app.state.search.lookup(int(app_id), country)
 
     return app
 

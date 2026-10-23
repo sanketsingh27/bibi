@@ -3,7 +3,8 @@
 import { useState, type ReactNode } from "react";
 import type { Listing } from "./api";
 
-export function ListingRow({ app, children }: { app: Listing; children?: ReactNode }) {
+export function ListingRow({ app, children, heading = "h3" }: { app: Listing; children?: ReactNode; heading?: "h1" | "h3" }) {
+  const Heading = heading;
   const [iconFailed, setIconFailed] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "pending" | "success" | "error">("idle");
   // Artwork is promotional content: never show it without its original listing badge.
@@ -21,7 +22,7 @@ export function ListingRow({ app, children }: { app: Listing; children?: ReactNo
 
   return <li>
     <div className="listing-identity">
-      <h3>{app.name ?? "App name unavailable"}</h3>
+      <Heading>{app.name ?? "App name unavailable"}</Heading>
       <p>{app.developer ?? "Developer unavailable"}</p>
       <dl className="listing-metadata">
         <div><dt>Category</dt><dd>{app.category ?? "Unavailable"}</dd></div>
