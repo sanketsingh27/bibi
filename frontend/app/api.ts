@@ -18,7 +18,12 @@ export type SearchResponse = {
   cached: boolean;
   results: Listing[];
 };
-export type AppDetailsResponse = Listing & { fetchedAt: string; cached: boolean };
+export type AppDetailsResponse = Listing & {
+  fetchedAt: string; cached: boolean;
+  description: string | null; screenshotUrls: string[];
+  version: string | null; formattedPrice: string | null;
+  releaseDate: string | null; currentVersionReleaseDate: string | null; releaseNotes: string | null;
+};
 export type SearchIdentity = { phrase: string; country: Storefront };
 
 export const errorMessages: Record<string, { title: string; message: string }> = {

@@ -196,3 +196,36 @@ async def test_static_search_and_catalog_remain_available_without_ai_configurati
         response = await client.get("/api/v1/apps/search?q=planner&country=us")
     assert response.status_code == 200
     assert response.json()["results"][0]["appId"] == 42
+
+
+@pytest.mark.parametrize("optional", [{}, {
+    "description": None, "screenshotUrls": None, "ipadScreenshotUrls": {},
+    "version": 3, "formattedPrice": False, "releaseDate": "yesterday",
+    "currentVersionReleaseDate": {}, "releaseNotes": [],
+}])
+async def test_optional_details_stay_unavailable_without_losing_legitimate_zero_ratings(optional):
+    async with api(lambda request: payload([listing(42, averageUserRating=0, userRatingCount=0, **optional)])) as client:
+        response = await client.get("/api/v1/apps/42?country=us")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["averageRating"] == 0 and body["ratingCount"] == 0
+    for field in ("description", "version", "formattedPrice", "releaseDate", "currentVersionReleaseDate", "releaseNotes"):
+        assert body[field] is None
+    assert body["screenshotUrls"] == []
+
+
+async def test_details_keep_text_inert_and_filter_unsafe_screenshots_without_hiding_listing():
+    async with api(lambda request: payload([listing(42,
+            description="<script>alert(1)</script>", releaseNotes="<img src=x onerror=alert(1)>",
+            screenshotUrls=["javascript:alert(1)", "https://images.apple.com/one.png", None,
+                            "https://user:pass@evil.test/a", "https://evil.test:444/a", "data:image/svg+xml,x"],
+            ipadScreenshotUrls=["https://images.apple.com/one.png", "https://images.apple.com/two.png"],
+            version="2.0", formattedPrice="$0.00", releaseDate="2024-01-01T00:00:00Z",
+            currentVersionReleaseDate="2026-10-01T12:00:00Z")])) as client:
+        response = await client.get("/api/v1/apps/42?country=us")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["screenshotUrls"] == ["https://images.apple.com/one.png", "https://images.apple.com/two.png"]
+    assert body["description"].startswith("<script>") and body["releaseNotes"].startswith("<img")
+    assert body["formattedPrice"] == "$0.00" and body["version"] == "2.0"
+    assert body["releaseDate"].endswith("Z") and body["currentVersionReleaseDate"].endswith("Z")

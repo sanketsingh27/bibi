@@ -26,8 +26,8 @@ export function ListingRow({ app, children, heading = "h3" }: { app: Listing; ch
       <p>{app.developer ?? "Developer unavailable"}</p>
       <dl className="listing-metadata">
         <div><dt>Category</dt><dd>{app.category ?? "Unavailable"}</dd></div>
-        <div><dt>Average rating</dt><dd>{app.averageRating === null ? "Unavailable" : `${app.averageRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} / 5`}</dd></div>
-        <div><dt>Ratings</dt><dd>{app.ratingCount === null ? "Unavailable" : app.ratingCount.toLocaleString()}</dd></div>
+        <div><dt>Average listing rating</dt><dd>{app.averageRating === null ? "Unavailable" : `${app.averageRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} / 5`}</dd></div>
+        <div><dt>Listing ratings</dt><dd>{app.ratingCount === null ? "Unavailable" : app.ratingCount.toLocaleString()}</dd></div>
       </dl>
       <p className="app-id">Apple app ID <span>{app.appId}</span></p>
       <button type="button" className="secondary copy-id" onClick={() => void copyId()} disabled={copyState === "pending"} aria-label={`Copy Apple app ID ${app.appId}`}>{copyState === "pending" ? "Copying…" : "Copy app ID"}</button>

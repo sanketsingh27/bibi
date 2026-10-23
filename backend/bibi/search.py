@@ -7,7 +7,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
-from .models import AppDetailsResponse, SearchResponse, normalize_results
+from .models import AppDetailsResponse, SearchResponse, normalize_details, normalize_results
 
 
 SEARCH_PARAMETERS = (("media", "software"), ("entity", "software"), ("lang", "en_us"))
@@ -125,5 +125,7 @@ class SearchService:
         if limit is None:
             if not results:
                 raise SearchError(404, "APP_UNAVAILABLE", "This exact app is unavailable in the requested storefront.")
-            return AppDetailsResponse(**results[0].model_dump(), fetchedAt=fetched_at, cached=False)
+            return AppDetailsResponse(**results[0].model_dump(),
+                                      **normalize_details(next(record for record in records if record.get("kind") == "software")),
+                                      fetchedAt=fetched_at, cached=False)
         return SearchResponse(query=query, country=country, fetchedAt=fetched_at, cached=False, results=results)

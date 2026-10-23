@@ -1,6 +1,7 @@
+from datetime import datetime
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 MAX_SAFE_INTEGER = 2**53 - 1
 
@@ -18,6 +19,13 @@ class Listing(BaseModel):
 
 
 class AppDetailsResponse(Listing):
+    description: str | None
+    screenshotUrls: list[str] = Field(default_factory=list)
+    version: str | None
+    formattedPrice: str | None
+    releaseDate: str | None
+    currentVersionReleaseDate: str | None
+    releaseNotes: str | None
     fetchedAt: str
     cached: bool
 
@@ -100,3 +108,23 @@ def normalize_results(records: list[dict], country: str, limit: int) -> list[Lis
         if len(results) == limit:
             break
     return results
+
+
+def normalize_details(record: dict) -> dict:
+    fields = {key: text(record.get(key)) for key in ("description", "version", "formattedPrice", "releaseNotes")}
+    for key in ("releaseDate", "currentVersionReleaseDate"):
+        value = text(record.get(key))
+        try:
+            parsed = datetime.fromisoformat(value) if value else None
+            fields[key] = value if parsed and parsed.tzinfo is not None else None
+        except ValueError:
+            fields[key] = None
+    screenshots = []
+    for key in ("screenshotUrls", "ipadScreenshotUrls"):
+        values = record.get(key)
+        if isinstance(values, list):
+            for value in values:
+                url = safe_url(value)
+                if url and url not in screenshots:
+                    screenshots.append(url)
+    return {**fields, "screenshotUrls": screenshots}
