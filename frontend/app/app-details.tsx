@@ -82,9 +82,9 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
 
   return <main className="app-details" id="app-details" ref={content} tabIndex={-1}>
     <button type="button" className="secondary" onClick={onBack}>Back to search</button>
-    <p className="eyebrow detail-scope">Apple App Store · Storefront: {identity.country.toUpperCase() || "Unavailable"} · App ID {identity.appId || "Unavailable"}</p>
+    <p className="eyebrow detail-scope">Apple App Store · Storefront: {identity.country.toUpperCase() || "Unavailable"}{screen.kind !== "success" && ` · App ID ${identity.appId || "Unavailable"}`}</p>
     <section aria-label="Exact app listing" aria-busy={screen.kind === "loading"}>
-      <div role="status" aria-live="polite" className="status-line">
+      <div role="status" aria-live="polite" className={screen.kind === "success" ? "visually-hidden" : "status-line"}>
         {screen.kind === "loading" ? "Loading the exact app listing…" : screen.kind === "success" ? (screen.saved ? "Saved listing snapshot. Live lookup failed." : "Exact listing loaded.") : "Listing lookup not completed."}
       </div>
       {screen.kind === "loading" && <h1>Loading app details…</h1>}
@@ -95,10 +95,10 @@ export function AppDetails({ identity, onBack }: { identity: DetailIdentity; onB
       </div>}
       {screen.kind === "success" && <>
         {screen.saved && <div className="saved-notice" role="status"><strong>Saved snapshot · Live lookup failed</strong><p>{(detailErrors[screen.lookupError ?? ""] ?? errorMessages.CONNECTION_ERROR).message} Showing previously saved metadata for this exact app and storefront.</p><button type="button" className="secondary" onClick={() => setAttempt((value) => value + 1)}>Retry exact lookup</button></div>}
-        <ul className="results"><ListingRow key={`${screen.data.appId}:${screen.data.country}:${screen.data.fetchedAt}`} app={screen.data} heading="h1" /></ul>
+        <ul className="results"><ListingRow key={`${screen.data.appId}:${screen.data.country}:${screen.data.fetchedAt}`} app={screen.data} heading="h1" price={screen.data.formattedPrice} /></ul>
         <p className="result-note">Listing ratings belong to the {screen.data.country.toUpperCase()} storefront. Ratings are not written reviews.</p>
+        <DetailContent key={`${screen.data.appId}:${screen.data.country}`} app={screen.data} />
         <p className="fetch-info">Metadata fetched <time dateTime={screen.data.fetchedAt}>{new Date(screen.data.fetchedAt).toLocaleString()}</time> · {screen.saved ? "Saved on this device · Not live metadata" : screen.data.cached ? "Cached metadata" : "Fresh from Apple · Not cached"}</p>
-        <DetailContent app={screen.data} />
       </>}
     </section>
     {storageMessage && <p className="fetch-info" role="status">{storageMessage}</p>}

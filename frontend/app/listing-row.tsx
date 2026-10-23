@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { Listing } from "./api";
 
-export function ListingRow({ app, children, heading = "h3" }: { app: Listing; children?: ReactNode; heading?: "h1" | "h3" }) {
+export function ListingRow({ app, children, heading = "h3", price }: { app: Listing; children?: ReactNode; heading?: "h1" | "h3"; price?: string | null }) {
   const Heading = heading;
   const [iconFailed, setIconFailed] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "pending" | "success" | "error">("idle");
@@ -28,13 +28,16 @@ export function ListingRow({ app, children, heading = "h3" }: { app: Listing; ch
         <div><dt>Category</dt><dd>{app.category ?? "Unavailable"}</dd></div>
         <div><dt>Average listing rating</dt><dd>{app.averageRating === null ? "Unavailable" : `${app.averageRating.toLocaleString(undefined, { maximumFractionDigits: 2 })} / 5`}</dd></div>
         <div><dt>Listing ratings</dt><dd>{app.ratingCount === null ? "Unavailable" : app.ratingCount.toLocaleString()}</dd></div>
+        {heading === "h1" && <div><dt>Price</dt><dd>{price ?? "Unavailable"}</dd></div>}
       </dl>
+      <div className="id-actions">
       <p className="app-id">Apple app ID <span>{app.appId}</span></p>
       <button type="button" className="secondary copy-id" onClick={() => void copyId()} disabled={copyState === "pending"} aria-label={`Copy Apple app ID ${app.appId}`}>{copyState === "pending" ? "Copying…" : "Copy app ID"}</button>
       <p className={`copy-status${copyState === "error" ? " copy-error" : ""}`} role="status" aria-live="polite" aria-atomic="true">
         {copyState === "success" && `Copied Apple app ID ${app.appId}.`}
         {copyState === "error" && `Could not copy Apple app ID ${app.appId}. Select and copy the number above manually.`}
       </p>
+      </div>
     </div>
     <div className="listing-artwork">
       {children}
