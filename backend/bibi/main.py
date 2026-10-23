@@ -17,6 +17,9 @@ from .search import SearchError, SearchService
 from .storefronts import STOREFRONTS
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 class SearchParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
     q: str
@@ -71,12 +74,12 @@ class AISettingsInput(BaseModel):
 def local_request_allowed(request: Request) -> bool:
     try:
         host = urlsplit(f"//{request.headers.get('host', '')}").hostname
-        if host not in {"127.0.0.1", "localhost", "::1"}:
+        if host not in LOOPBACK_HOSTS:
             return False
         origin = request.headers.get("origin")
         if origin is not None:
             parsed = urlsplit(origin)
-            if parsed.scheme != "http" or parsed.hostname != host or parsed.path or parsed.query or parsed.fragment:
+            if parsed.scheme != "http" or parsed.hostname not in LOOPBACK_HOSTS or parsed.path or parsed.query or parsed.fragment:
                 return False
         if request.headers.get("sec-fetch-site") in {"cross-site", "same-site"}:
             return False

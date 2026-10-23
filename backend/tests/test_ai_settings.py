@@ -90,9 +90,27 @@ async def test_failed_key_replacement_preserves_existing_key_and_reports_safe_er
 
 
 @pytest.mark.parametrize("headers", [
+    {"origin": "http://localhost:3000"},
+    {"host": "localhost:8000", "origin": "http://127.0.0.1:3000"},
+])
+async def test_loopback_origin_aliases_allow_credential_mutation(headers):
+    secret = "sk-or-v1-" + "e" * 40
+    async with api() as (client, store):
+        response = await client.put(
+            "/api/v1/ai/settings",
+            json={"apiKey": secret},
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert store.value == secret
+        assert store.writes == 1
+
+
+@pytest.mark.parametrize("headers", [
     {"origin": "https://attacker.invalid"},
     {"host": "attacker.invalid", "origin": "http://127.0.0.1"},
-    {"origin": "http://localhost"},
+    {"origin": "http://attacker.invalid"},
+    {"origin": "http://localhost", "sec-fetch-site": "cross-site"},
 ])
 async def test_hostile_request_context_is_rejected_before_store_mutation(headers):
     async with api() as (client, store):
