@@ -82,6 +82,8 @@ These gates apply across the project, including parallel worktrees. Follow the n
 
 **Enter at the applicable phase.** Start at the earliest phase whose prerequisites are not satisfied. Creating tickets from an existing approved spec starts at Phase 4; publishing already approved ticket drafts resumes Phase 4 at publication. Verify existing approvals against the current scope, but do not repeat completed phases merely because this file was reread or a new session started. Missing approval or a material scope change still requires the relevant approval gate.
 
+**Branches and worktrees.** Use `dev` as the integration branch and PR target; promote reviewed changes from `dev` to `main` only with user authorization. The developer keeps `dev` in sync with `main`. Maintain two reusable implementation worktrees, each hosting one active feature branch and one active implementation session. Related tickets may run sequentially on the same feature branch. Follow `docs/agents/commit-strategy.md` when assigning branches, preparing or reusing worktrees, and opening PRs.
+
 ### Phase 1: Report the planning model (non-blocking)
 
 1. When starting a new feature's planning, report the active model and thinking/reasoning level once from session metadata or a read-only status command. If either is not exposed, say it is unverified; do not guess.
@@ -108,7 +110,7 @@ These gates apply across the project, including parallel worktrees. Follow the n
 1. Use `/to-tickets` on the approved spec to produce small, independently verifiable vertical slices with explicit blocking edges.
 2. Include the ticket contract below in every draft. Present the breakdown, tests, success criteria, dependencies, and proposed branches; ask the user to verify and approve the tickets before publishing.
 3. Publish approved tickets as GitHub issues in dependency order. Reference the parent spec and use native blocking relationships where available, following `docs/agents/issue-tracker.md`.
-4. Once issue numbers exist, replace proposed branch placeholders with exact issue-scoped branch names, such as `feature/42-save-filter`. Follow `docs/agents/commit-strategy.md`; each ticket owns one unique branch.
+4. Once issue numbers exist, use the ticket number alone as the branch name, such as `42`, without a prefix or description. Related sequential tickets may share the first ticket's numbered branch; record that shared assignment and ticket order in every affected ticket. Follow `docs/agents/commit-strategy.md`.
 5. Verify every published ticket has the full contract and an exact branch before marking it `ready-for-agent`. Return the issue links, ticket-to-branch mapping, blockers, and currently unblocked tickets.
 
 #### Required ticket contract
@@ -117,7 +119,7 @@ Each ticket body must contain:
 
 - **Parent spec:** its GitHub issue link, with the relevant user stories or decisions.
 - **What to build and out of scope:** one complete user-visible slice and its boundaries.
-- **Branch:** the exact assigned branch; **base branch:** the repository's actual integration branch. Record the worktree path when assigned.
+- **Branch:** the exact assigned feature branch, including any related tickets sharing it and their order; **base branch:** `dev`. Record the reusable worktree path when assigned.
 - **Blocked by:** specific issue links, or `None`; include unresolved decisions, missing credentials, and other prerequisites separately.
 - **Acceptance criteria:** checkable conditions describing successful behavior, including relevant boundaries and error cases.
 - **Tests:** behavioral scenarios, the test seam, relevant existing tests to run or extend, exact runnable commands and working directories, and expected results. New regression tests must catch plausible consumer-visible failures; do not add tests just to satisfy a count.
@@ -129,7 +131,7 @@ No ticket is ready with missing tests, vague success criteria, an unresolved bra
 ### Phase 5: Authorize and hand off
 
 1. After ticket verification and publication, ask the user which unblocked tickets to implement. Ticket approval, publication, labels, or silence are not implementation authorization.
-2. An unresolved blocker prevents implementation of that ticket; independent approved tickets may proceed. A dependency is satisfied only when its accepted changes are integrated into the ticket's base and available in its worktree, not merely because its issue is closed.
+2. An unresolved blocker prevents implementation of that ticket; independent approved tickets may proceed. For related tickets sharing a feature branch, a prerequisite is satisfied when its required tests and runtime verification pass, its changes are committed on that branch, and the verification evidence and commit are recorded in the handoff. Intermediate acceptance and merging are not required to start the next authorized ticket on that branch; final acceptance is still required before closing tickets or merging the feature. For dependencies on another feature branch, accepted changes must be merged into `dev` and available in the implementing worktree. An issue being closed alone does not satisfy a dependency.
 3. Once authorized, provide a fresh-session handoff containing the ticket and spec links, exact branch, base, worktree path if assigned, dependency state, authorization, and verification commands.
 4. All ticket implementation starts in a new session using the client's configured default model, not an inherited planning-session override. Do not hard-code a model name. Verify this from exposed session settings or ask the user to confirm if not observable; any correction remains manual.
 5. End the planning session at the handoff. Do not implement there or simulate a fresh session by clearing context. If the client cannot launch a new session, provide the handoff for the user to open one manually.
@@ -139,15 +141,15 @@ No ticket is ready with missing tests, vague success criteria, an unresolved bra
 1. In the fresh session, read this workflow and the assigned ticket, spec, and comments. Confirm explicit authorization and satisfied blockers before implementation.
 2. Verify the working directory with `git rev-parse --show-toplevel`, the active branch with `git branch --show-current`, and worktree registration with `git worktree list --porcelain`. Compare the active branch exactly with the ticket's recorded branch.
 3. A missing assignment, detached HEAD, mismatched branch, or conflicting worktree owner is a hard stop before editing. Report the expected branch and observed state; do not silently switch branches, rewrite the ticket's assignment, or implement another branch's ticket.
-4. Use one ticket branch per worktree and one active implementation session per ticket/worktree. Multiple worktrees may implement independent, authorized tickets on distinct branches; they must not edit each other's worktrees. Prepare a dedicated worktree on the assigned branch before launching its implementation session.
+4. Assign an available worktree from the two-worktree pool and prepare the recorded feature branch before launching its implementation session. Related sequential tickets retain the same branch and worktree, transferring ownership between fresh sessions. Parallel work uses distinct worktrees and feature branches; sessions must not edit each other's worktrees. When both worktrees are occupied, queue new features unless the user authorizes an additional worktree. Reuse a worktree only after the prior session releases ownership, following `docs/agents/commit-strategy.md`.
 5. Implement only the assigned ticket using the relevant skills and existing patterns. Keep implementation, tests, migrations, and required documentation on its branch. Follow the commit strategy; do not start another ticket in the same session.
 
 ### Phase 7: Prove completion and request acceptance
 
 1. Run the ticket's specified behavioral tests and exercise its runtime verification scenario. Check every acceptance criterion against observed evidence.
 2. Report commands, working directories, results, and remaining blockers on the ticket. An unrun or failed required check means the ticket is not complete.
-3. Ask the user to verify the result and accept the ticket. Until acceptance, keep it open and do not merge it; address requested corrections within the same ticket's scope and branch.
-4. After acceptance, close or merge only when the user authorizes those actions. Hand off subsequent tickets to their own fresh default-model sessions and assigned worktrees.
+3. Ask the user to verify the result and accept the ticket. Until acceptance, keep it open and do not merge its feature branch; address requested corrections within the same ticket's scope and branch. A verified, committed ticket may hand off to the next authorized ticket on the same feature branch under Phase 5's dependency rule while acceptance remains pending.
+4. After acceptance, close tickets or merge the feature PR into `dev` only when the user authorizes those actions. Shared feature PRs require acceptance of all included tickets. Hand off subsequent tickets to fresh default-model sessions, reusing their assigned feature branch and worktree when part of the same sequence. Promotion from `dev` to `main` requires review of the combined changes and separate user authorization.
 
 ---
 
