@@ -6,7 +6,28 @@ Tickets [#15](https://github.com/sanketsingh27/bibi/issues/15), [#16](https://gi
 
 Use Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+ and npm 11. The verified environment used Python 3.12.4, uv 0.11.7, Node.js 25.9.0 and npm 11.21.0. No Apple credential, database, account, or environment file is required. Apple connectivity is needed only for live searches, not the API suite.
 
-From `backend/`:
+From the repository root:
+
+```sh
+./dev install
+./dev
+```
+
+`install` runs the locked backend and frontend installs with npm lifecycle scripts
+disabled; it starts no servers. Normal startup skips installation and runs both
+servers in the invoking terminal, with their live output visible. Open the printed
+**Frontend** URL. The launcher prefers frontend port **3000** and backend port
+**8000**, choosing distinct available alternatives when either port is occupied.
+Both API prefixes automatically forward to the selected backend port.
+
+Press **Ctrl+C** to stop both servers and their child processes. SIGTERM or either
+server exiting also cleans up this invocation; unrelated listeners are preserved.
+Both servers bind only to `127.0.0.1`, with one backend worker. `./dev.sh` supports
+the same commands. Either entrypoint also works by absolute path from another
+directory. Missing tools/dependencies or unsupported arguments produce guidance
+and a nonzero exit.
+
+For manual startup, from `backend/`:
 
 ```sh
 uv sync --frozen
@@ -62,7 +83,7 @@ Icons load directly in the browser from normalized HTTPS artwork URLs; the backe
 
 ## API
 
-The browser uses same-origin `/api/v1/apps/*` and `/api/v1/ai/*`; Next.js rewrites both fixed paths to the local FastAPI server at `http://127.0.0.1:8000`. FastAPI calls Apple's fixed search endpoint and stores the OpenRouter key only in the macOS Keychain. There are no caller-supplied upstream URLs, Apple Lookup calls, review fetches, model catalog, or inference operations in this slice. External App Store links are ordinary navigation, not API searches.
+The browser uses same-origin `/api/v1/apps/*` and `/api/v1/ai/*`; Next.js rewrites both fixed paths to the local FastAPI server. The launcher supplies `BIBI_BACKEND_PORT`; manual startup defaults to `http://127.0.0.1:8000`. FastAPI calls Apple's fixed search endpoint and stores the OpenRouter key only in the macOS Keychain. There are no caller-supplied upstream URLs, Apple Lookup calls, review fetches, model catalog, or inference operations in this slice. External App Store links are ordinary navigation, not API searches.
 
 ### Secure OpenRouter key Settings
 
@@ -115,6 +136,10 @@ Errors have one shape: `{error: {code, message}}`. Messages never expose raw ups
 FastAPI's generated schema is at http://127.0.0.1:8000/docs.
 
 ## Verification
+
+From the repository root, `backend/.venv/bin/python -m unittest discover -s tests -p test_dev_launcher.py -v`
+runs the launcher checks in temporary projects, including installation, port
+conflicts, signals, server failures, and cleanup without stopping unrelated listeners.
 
 From `backend/`, with `.venv` activated, `python -m pytest` runs the offline behavioral API suite. It uses the real FastAPI boundary/service and controls only the Apple HTTPX transport and time. Tests cover input/catalog agreement, ordering/filtering/deduplication/capping, nullable metadata and safe URLs, empty versus malformed results, failures/429/timeout, failed-attempt accounting, exact rolling-window and 24-hour boundaries, country/limit/case/whitespace identity, shared success/failure, manual recovery without stale fallback, cache/join precedence under exhausted budget, fresh application reset, disconnect/shutdown handling, and the overall deadline during a blocked body read. Concurrency uses deterministic events and controlled clock reads, not sleeps. There is no separate helper/UI unit-test seam.
 
