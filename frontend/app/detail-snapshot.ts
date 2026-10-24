@@ -1,4 +1,5 @@
 import type { AppDetailsResponse } from "./api";
+import { loadListingSnapshot, saveListingSnapshot } from "./research-library";
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
@@ -35,21 +36,6 @@ export function validatedDetails(value: unknown, appId: number, country: string)
 
 // Persist metadata/URLs only, never artwork files or credentials.
 export async function detailSnapshot(appId: number, country: string, data?: AppDetailsResponse): Promise<unknown> {
-  const database = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("bibi-detail-snapshots", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("listings");
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("Snapshot storage blocked"));
-  });
-  try {
-    return await new Promise((resolve, reject) => {
-      const transaction = database.transaction("listings", data ? "readwrite" : "readonly");
-      const store = transaction.objectStore("listings");
-      const request = data ? store.put(data, `${appId}:${country}`) : store.get(`${appId}:${country}`);
-      transaction.oncomplete = () => resolve(request.result);
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-  } finally { database.close(); }
+  if (data) return saveListingSnapshot(data);
+  return loadListingSnapshot(appId, country);
 }

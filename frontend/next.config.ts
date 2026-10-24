@@ -6,6 +6,7 @@ const config: NextConfig = {
   async rewrites() {
     return [
       { source: "/api/v1/apps/:path*", destination: `http://127.0.0.1:${backendPort}/api/v1/apps/:path*` },
+      { source: "/api/v1/operations/:path*", destination: `http://127.0.0.1:${backendPort}/api/v1/operations/:path*` },
       { source: "/api/v1/ai/:path*", destination: `http://127.0.0.1:${backendPort}/api/v1/ai/:path*` },
     ];
   },

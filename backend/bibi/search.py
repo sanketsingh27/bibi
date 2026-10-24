@@ -39,12 +39,29 @@ def valid_retry_after(value: str | None) -> str | None:
 
 
 class SearchService:
-    def __init__(self, client: httpx.AsyncClient, clock: Callable[[], float]):
+    def __init__(self, client: httpx.AsyncClient, clock: Callable[[], float], sleeper=asyncio.sleep):
         self.client = client
         self.clock = clock
+        self.sleeper = sleeper
         self.dispatched: deque[float] = deque()
         self.cache: dict[SearchKey | LookupKey, tuple[float, MetadataResponse]] = {}
         self.pending: dict[SearchKey | LookupKey, asyncio.Task[MetadataResponse]] = {}
+        self.last_dispatch: float | None = None
+
+    async def reserve_review_dispatch(self) -> None:
+        """Reserve a shared Apple budget slot for one review page request."""
+        while True:
+            now = self.clock()
+            while self.dispatched and self.dispatched[0] <= now - 60:
+                self.dispatched.popleft()
+            wait_for_budget = max(0, self.dispatched[0] + 60 - now) if len(self.dispatched) >= 10 else 0
+            wait_for_pace = max(0, self.last_dispatch + 1 - now) if self.last_dispatch is not None else 0
+            wait = max(wait_for_budget, wait_for_pace)
+            if wait <= 0:
+                self.dispatched.append(now)
+                self.last_dispatch = now
+                return
+            await self.sleeper(wait)
 
     async def search(self, query: str, country: str, limit: int) -> SearchResponse:
         key = (query, country, limit, SEARCH_PARAMETERS)

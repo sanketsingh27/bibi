@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AppDetailsResponse } from "./api";
+import { ReviewPanel } from "./review-panel";
 
 function Screenshot({ url, index, app }: { url: string; index: number; app: AppDetailsResponse }) {
   const [failed, setFailed] = useState(false);
@@ -10,7 +11,6 @@ function Screenshot({ url, index, app }: { url: string; index: number; app: AppD
     <a className="store-badge" href={app.storeUrl!} target="_blank" rel="noopener noreferrer" aria-label={`View original listing for screenshot ${index + 1} (new tab)`}><img src="/download-on-the-app-store.svg" alt="Download on the App Store" width="120" height="40" /></a>
   </li>;
 }
-
 function ScreenshotCarousel({ app }: { app: AppDetailsResponse }) {
   const track = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
@@ -68,12 +68,12 @@ function Description({ text }: { text: string | null }) {
   </section>;
 }
 
-export function DetailContent({ app }: { app: AppDetailsResponse }) {
+export function DetailContent({ app, savedScope = false }: { app: AppDetailsResponse; savedScope?: boolean }) {
   const tabs = ["Analysis", "Reviews", "Competitors"];
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(1);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   return <>
-    <ScreenshotCarousel app={app} />
+    {!savedScope && <ScreenshotCarousel app={app} />}
     <Description text={app.description} />
     <div className="research-tabs" role="tablist" aria-label="App research" onKeyDown={(event) => {
       let next: number;
@@ -89,7 +89,7 @@ export function DetailContent({ app }: { app: AppDetailsResponse }) {
     {tabs.map((tab, index) => <section key={tab} role="tabpanel" id={`panel-${index}`} aria-labelledby={`tab-${index}`} tabIndex={0} hidden={active !== index} className="research-panel">
       <h2>{tab}</h2>
       {index === 0 && <p>Analysis is not available yet. No written reviews have been collected or analyzed for this app.</p>}
-      {index === 1 && <p>Written reviews are not available yet. The listing rating count above is not a written-review count.</p>}
+      {index === 1 && <ReviewPanel app={app} savedScope={savedScope} />}
       {index === 2 && <p>Competitor suggestions and comparison are not available yet. No apps have been classified as competitors.</p>}
     </section>)}
     <section className="additional-details" aria-labelledby="details-title"><h2 id="details-title">Listing details</h2>
